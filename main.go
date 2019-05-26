@@ -9,7 +9,7 @@ import (
 
 //
 func main() {
-	fmt.Println("hello world")
+	fmt.Println("File-Relay server is running...")
 	//os.Exit(0)
 	os.Exit(filerelay.Start())
 }

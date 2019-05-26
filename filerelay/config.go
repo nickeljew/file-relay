@@ -1,5 +1,10 @@
 package filerelay
 
+const (
+	PORT = "12721"
+	NetType = "tcp"
+)
+
 type Config struct {
 	host        string
 	port        string
@@ -8,12 +13,7 @@ type Config struct {
 	maxRoutines int
 }
 
-func InitConfig() (*Config, error) {
-	//TODO: read config from yaml file
-	return &Config{
-		port:        "12721",
-		networkType: "tcp",
 
-		maxRoutines: 2,
-	}, nil
+func (c *Config) Addr() string {
+	return c.host + ":" + c.port
 }
