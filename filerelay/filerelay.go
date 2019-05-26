@@ -5,6 +5,12 @@ import (
 	"net"
 )
 
+
+//
+// func init() {
+// 	//
+// }
+
 //
 func Start() int {
 	cfg, _ := InitConfig()
@@ -16,9 +22,11 @@ func Start() int {
 	}
 	defer lis.Close()
 
-	server := &Server{cfg.maxRoutines}
-	err = server.handleConn()
-	if err != nil {
+	server := NewServer(cfg.maxRoutines)
+	
+	go server.start()
+
+	if err := server.handleConn(nil); err != nil {
 		fmt.Println("Error handling: ", err.Error())
 		return 1
 	}
