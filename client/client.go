@@ -48,7 +48,7 @@ func main() {
 
 	rand.Seed(time.Now().Unix())
 
-	cnt := 5
+	cnt := 1
 	fin := make(chan int)
 
 	for i := 0; i < cnt; i++ {
@@ -101,8 +101,8 @@ func trySet() error {
 		rw: bufio.NewReadWriter(bufio.NewReader(nc), bufio.NewWriter(nc)),
 	}
 
-	cmd := "set"
 	item := &filerelay.Item{
+		Cmd: "set",
 		Key: "test123",
 		Value: []byte("Hello World - " + strconv.Itoa(random(10, 50))),
 		Expiration: 1800,
@@ -113,7 +113,7 @@ func trySet() error {
 	// }
 
 	_, err = fmt.Fprintf(client.rw, "%s %s %d %d %d\r\n",
-	cmd, item.Key, item.Flags, item.Expiration, len(item.Value))
+	item.Cmd, item.Key, item.Flags, item.Expiration, len(item.Value))
 	if err != nil {
 		return err
 	}
@@ -128,24 +128,24 @@ func trySet() error {
 		return err
 	}
 
-	byteData, err := client.rw.ReadSlice('\n')
+	line, err := client.rw.ReadSlice('\n')
 	if err != nil {
 		return err
 	}
-	fmt.Println("Response from server:", strings.Trim(string(byteData), " \r\n"))
+	fmt.Println("Response from server:", strings.Trim(string(line), " \r\n"))
 
 	switch {
-	case bytes.Equal(byteData, filerelay.ResultStored):
+	case bytes.Equal(line, filerelay.ResultStored):
 		return nil
-	case bytes.Equal(byteData, filerelay.ResultNotStored):
+	case bytes.Equal(line, filerelay.ResultNotStored):
 		return ErrNotStored
-	case bytes.Equal(byteData, filerelay.ResultExists):
+	case bytes.Equal(line, filerelay.ResultExists):
 		return ErrCASConflict
-	case bytes.Equal(byteData, filerelay.ResultNotFound):
+	case bytes.Equal(line, filerelay.ResultNotFound):
 		return ErrCacheMiss
 	}
 
-	return fmt.Errorf("Unexpected response line from %q: %q", cmd, string(byteData))
+	return fmt.Errorf("Unexpected response line from %q: %q", item.Cmd, string(line))
 }
 
 

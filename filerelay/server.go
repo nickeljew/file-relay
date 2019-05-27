@@ -3,7 +3,6 @@ package filerelay
 import (
 	"fmt"
 	"net"
-	"strings"
 	"bufio"
 )
 
@@ -126,12 +125,14 @@ func (h *handler) process(cn *conn) error {
 	h.running = true
 	//h.cn = c
 
-	byteData, err := cn.rw.ReadSlice('\n')
+	line, err := cn.rw.ReadSlice('\n')
 	if err != nil {
 		return err
 	}
-	line := strings.Trim(string(byteData), " \r\n")
-	fmt.Printf(" - Recv: %s\n -\n", line)
+
+	item := &Item{}
+	item.parseLine(line)
+	fmt.Printf(" - Recv: %T %v\n -\n", item, item)
 
 	if _, err = cn.rw.Write(ResultStored); err != nil {
 		return err

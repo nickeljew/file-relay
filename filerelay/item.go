@@ -1,5 +1,11 @@
 package filerelay
 
+import (
+	"strconv"
+	"strings"
+	//"fmt"
+)
+
 
 var (
 	Crlf            = []byte("\r\n")
@@ -20,6 +26,8 @@ var (
 
 
 type Item struct {
+	Cmd string
+
 	// Key is the Item's key (250 bytes maximum).
 	Key string
 
@@ -40,12 +48,38 @@ type Item struct {
 }
 
 //
-func (t *Item) gen(cmd string) {
-	//
+func (t *Item) parseLine(line []byte) {
+	parts := strings.Split(strings.Trim(string(line), " \r\n"), " ")
+
+	if t.Cmd = parts[0]; t.Cmd == "" {
+		return
+	}
+	
+	t.handleStoreCmdParts(parts[1:])
 }
 
+func (t *Item) handleStoreCmdParts(parts []string) {
+	if t.Key = parts[0]; !ValidKey(t.Key) {
+		return
+	}
+
+	if d, e := strconv.ParseInt(parts[1], 10, 32); e == nil && d >= 0 {
+		t.Flags = uint32(d)
+	}
+	if d, e := strconv.ParseInt(parts[2], 10, 32); e == nil {
+		t.Expiration = int32(d)
+	}
+
+	if t.Cmd == "cas" {
+		if d, e := strconv.ParseInt(parts[3], 10, 64); e == nil && d >= 0 {
+			t.casid = uint64(d)
+		}
+	}
+}
+
+//
 func ValidKey(key string) bool {
-	if len(key) > 250 {
+	if l := len(key); l == 0 || l > 250 {
 		return false
 	}
 	for i := 0; i < len(key); i++ {
