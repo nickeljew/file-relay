@@ -130,9 +130,21 @@ func (h *handler) process(cn *conn) error {
 		return err
 	}
 
-	item := &Item{}
-	item.parseLine(line)
-	fmt.Printf(" - Recv: %T %v\n -\n", item, item)
+	reqline := &ReqLine{}
+	reqline.parseLine(line)
+	fmt.Printf(" - Recv: %T %v\n -\n", reqline, reqline)
+
+	// cnt := 0
+	// for {
+	// 	data, err := cn.rw.ReadSlice('\n')
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	cnt += len(data)
+	// 	if (cnt < reqline.ValueLen) {
+	// 		//
+	// 	}
+	// }
 
 	if _, err = cn.rw.Write(ResultStored); err != nil {
 		return err

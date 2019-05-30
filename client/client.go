@@ -19,7 +19,7 @@ import (
 var (
 	ErrNoServer = errors.New("No server")
 
-	// ErrCacheMiss means that a Get failed because the item wasn't present.
+	// ErrCacheMiss means that a Get failed because the data-key wasn't present.
 	ErrCacheMiss = errors.New("Cache miss")
 
 	// ErrCASConflict means that a CompareAndSwap call failed due to the
@@ -30,7 +30,7 @@ var (
 
 	// ErrNotStored means that a conditional write operation (i.e. Add or
 	// CompareAndSwap) failed because the condition was not satisfied.
-	ErrNotStored = errors.New("Item not stored")
+	ErrNotStored = errors.New("Data not stored")
 
 	// ErrServer means that a server error occurred.
 	ErrServerError = errors.New("Server error")
@@ -101,24 +101,27 @@ func trySet() error {
 		rw: bufio.NewReadWriter(bufio.NewReader(nc), bufio.NewWriter(nc)),
 	}
 
-	item := &filerelay.Item{
+	reqValue := []byte("Hello World - " + strconv.Itoa(random(10, 50)))
+	reqline := &filerelay.ReqLine{
 		Cmd: "set",
 		Key: "test123",
-		Value: []byte("Hello World - " + strconv.Itoa(random(10, 50))),
+		ValueLen: uint64(len(reqValue)),
+		Flags: 1,
 		Expiration: 1800,
 	}
 
-	// if !ValidKey(item.Key) {
+	// if !ValidKey(reqline.Key) {
 	// 	return ErrMalformedKey
 	// }
 
-	_, err = fmt.Fprintf(client.rw, "%s %s %d %d %d\r\n",
-	item.Cmd, item.Key, item.Flags, item.Expiration, len(item.Value))
-	if err != nil {
+	toSend := fmt.Sprintf("%s %s %d %d %d\r\n",
+	reqline.Cmd, reqline.Key, reqline.Flags, reqline.Expiration, reqline.ValueLen)
+	fmt.Printf("Sending:\n>%s", toSend)
+	if _, err = fmt.Fprintf(client.rw, toSend); err != nil {
 		return err
 	}
 
-	if _, err = client.rw.Write(item.Value); err != nil {
+	if _, err = client.rw.Write(reqValue); err != nil {
 		return err
 	}
 	if _, err := client.rw.Write(filerelay.Crlf); err != nil {
@@ -145,7 +148,7 @@ func trySet() error {
 		return ErrCacheMiss
 	}
 
-	return fmt.Errorf("Unexpected response line from %q: %q", item.Cmd, string(line))
+	return fmt.Errorf("Unexpected response line from %q: %q", reqline.Cmd, string(line))
 }
 
 
