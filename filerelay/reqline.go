@@ -3,6 +3,7 @@ package filerelay
 import (
 	"strconv"
 	"strings"
+	//"time"
 	//"fmt"
 )
 
@@ -53,9 +54,9 @@ type ReqLine struct {
 	// Expiration is the cache expiration time, in seconds: either a relative
 	// time from now (up to 1 month), or an absolute Unix epoch time.
 	// Zero means the ReqLine has no expiration time.
-	Expiration int32
+	Expiration int64//time.Duration
 
-	ValueLen uint64
+	ValueLen int
 
 	// Compare and swap ID.
 	casid uint64
@@ -67,8 +68,8 @@ func (rl *ReqLine) String() string {
 		"Cmd:", rl.Cmd, ", ",
 		"Key:", rl.Key, ", ",
 		"Flags:", strconv.FormatUint(uint64(rl.Flags), 10), ", ",
-		"Expiration:", strconv.FormatInt(int64(rl.Expiration), 10), ", ",
-		"ValueLen:", strconv.FormatUint(rl.ValueLen, 10), ", ",
+		"Expiration:", strconv.FormatInt(rl.Expiration, 10), ", ",
+		"ValueLen:", strconv.FormatInt(int64(rl.ValueLen), 10), ", ",
 		"}",
 	}
 	return strings.Join(arr, "")
@@ -111,14 +112,14 @@ func (rl *ReqLine) handleStoreCmdParts(parts []string) ([]string, error) {
 	i++
 
 	if d, e := strconv.ParseInt(parts[i], 10, 32); e == nil {
-		rl.Expiration = int32(d)
+		rl.Expiration = d
 	} else {
 		return nil, e
 	}
 	i++
 
 	if d, e := strconv.ParseInt(parts[i], 10, 64); e == nil && d >= 0 {
-		rl.ValueLen = uint64(d)
+		rl.ValueLen = int(d)
 	} else if e != nil {
 		return nil, e
 	} else {

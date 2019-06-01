@@ -6,6 +6,33 @@ import (
 	"bufio"
 )
 
+const (
+	szShift = 2
+
+	//for test
+	sz4B int = 4 << (szShift * iota)
+	sz16B
+	sz64B
+
+	//
+	szKB int = 1024 << (szShift * iota)
+	sz4KB
+	sz16KB
+	sz64KB
+	sz256KB
+	szMB
+)
+
+
+const (
+	MinExpiration = 60 //in seconds
+	SlotCheckIntv = 5 //seconds
+
+	SlotCapMin = sz4B//szKB
+	SlotCapMax = sz64B//szMB
+)
+
+
 //
 type Server struct {
 	max int
@@ -13,6 +40,9 @@ type Server struct {
 	waitlist []net.Conn
 	hdrNotif chan int
 	quit chan int
+
+	//
+	stubs map[int]*StubGroup
 }
 
 //
