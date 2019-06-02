@@ -105,7 +105,7 @@ func trySet() error {
 	reqline := &filerelay.ReqLine{
 		Cmd: "set",
 		Key: "test123",
-		ValueLen: uint64(len(reqValue)),
+		ValueLen: len(reqValue),
 		Flags: 1,
 		Expiration: 1800,
 	}

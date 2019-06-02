@@ -23,14 +23,35 @@ const (
 	szMB
 )
 
-
 const (
-	MinExpiration = 60 //in seconds
-	SlotCheckIntv = 5 //seconds
-
-	SlotCapMin = sz4B//szKB
-	SlotCapMax = sz64B//szMB
+	SlotMinExpriration = 60
+	StubCheckInterval = 5
 )
+
+
+type MemConfig struct {
+	MinExpiration int //in seconds
+	StubCheckIntv int //in seconds
+
+	SlotCapMin int //in bytes
+	SlotCapMax int //in bytes
+
+	SlotsInStub int
+	SlubsInGroup int
+}
+
+func NewMemConfig() MemConfig {
+	return MemConfig{
+		MinExpiration: SlotMinExpriration,
+		StubCheckIntv: StubCheckInterval,
+	
+		SlotCapMin: sz4B,//szKB,
+		SlotCapMax: sz64B,//szMB,
+	
+		SlotsInStub: 10,
+		SlubsInGroup: 10,
+	}
+}
 
 
 //
@@ -40,6 +61,7 @@ type Server struct {
 	waitlist []net.Conn
 	hdrNotif chan int
 	quit chan int
+	memCfg MemConfig
 
 	//
 	stubs map[int]*StubGroup
@@ -59,14 +81,19 @@ func makeConn(nc net.Conn) *conn {
 }
 
 
-func NewServer(max int) *Server {
+func NewServer(max int, c MemConfig) *Server {
 	return &Server{
 		max: max,
+		handlers: make([]*handler, 0, max),
 		hdrNotif: make(chan int),
+		quit: make(chan int),
+		memCfg: c,
+		stubs: make( map[int]*StubGroup ),
 	}
 }
 
 func (s *Server) Start() {
+	s.initStubs()
 	var i int
 	for {
 		select {
@@ -89,6 +116,22 @@ func (s *Server) Start() {
 
 func (s *Server) Stop() {
 	s.quit <- 0
+	s.clearStubs()
+}
+
+//
+func (s *Server) initStubs() {
+	for cap := s.memCfg.SlotCapMin; cap > s.memCfg.SlotCapMax; cap = cap << szShift {
+		s.stubs[cap] = NewStubGroup(cap,
+			s.memCfg.SlubsInGroup, s.memCfg.SlotsInStub,
+			s.memCfg.StubCheckIntv, s.memCfg.MinExpiration)
+	}
+}
+
+func (s *Server) clearStubs() {
+	for cap := s.memCfg.SlotCapMin; cap > s.memCfg.SlotCapMax; cap = cap << szShift {
+		s.stubs[cap] = nil
+	}
 }
 
 

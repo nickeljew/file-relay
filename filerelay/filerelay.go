@@ -42,7 +42,8 @@ func Start() int {
 	}
 	defer lis.Close()
 
-	server := NewServer(cfg.maxRoutines)
+	memCfg := NewMemConfig()
+	server := NewServer(cfg.maxRoutines, memCfg)
 	
 	go server.Start()
 	defer server.Stop()

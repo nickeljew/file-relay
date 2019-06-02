@@ -26,12 +26,18 @@ type Slot struct {
 	used int
 	setAt time.Time
 	duration time.Duration
+
+	minExpiration int
 }
 
-func NewSlot(cap int) *Slot {
+func NewSlot(cap, minExpiration int) *Slot {
+	if minExpiration < SlotMinExpriration {
+		minExpiration = SlotMinExpriration
+	}
 	return &Slot{
 		cap: cap,
 		data: make([]byte, cap, cap),
+		minExpiration: minExpiration,
 	}
 }
 
@@ -70,14 +76,14 @@ func (s *Slot) Data() []byte {
 	return s.data[:s.used]
 }
 
-func (s *Slot) ReadAndSet(r io.Reader, byteLen int, expiration int64) (n int, err error) {
+func (s *Slot) ReadAndSet(r io.Reader, byteLen int, expiration int) (n int, err error) {
 	if s.Occupied() {
 		return 0, &SlotError{"Slot is occupied"}
 	}
 	if byteLen > s.cap {
 		return 0, &SlotError{"Invalid byteLen"}
 	}
-	if expiration < MinExpiration {
+	if expiration < s.minExpiration {
 		return 0, &SlotError{"expiratin too short"}
 	}
 

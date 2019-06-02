@@ -12,17 +12,22 @@ type Stub struct {
 	slotCap int
 	slots *list.LinkedList
 	checkTime int64
+	checkIntv int
 	sync.Mutex
 }
 
-func NewStub(cap int, slotCount int) *Stub {
+func NewStub(cap, slotCount, checkIntv, minExpiration int) *Stub {
+	if (checkIntv < StubCheckInterval) {
+		checkIntv = StubCheckInterval
+	}
 	stub := Stub{
 		slotCap: cap,
 		slots: list.New(),
 		checkTime: time.Now().Unix(),
+		checkIntv: checkIntv,
 	}
 	for i := 0; i < slotCount; i++ {
-		stub.slots.Push( NewSlot(cap) )
+		stub.slots.Push( NewSlot(cap, minExpiration) )
 	}
 	return &stub
 }
@@ -38,7 +43,7 @@ func (s *Stub) FindAvailableSlot() *Slot {
 		return slot
 	}
 
-	if nw := time.Now().Unix(); nw - s.checkTime >= SlotCheckIntv {
+	if pass := int(time.Now().Unix() - s.checkTime); pass >= s.checkIntv {
 		entry = s.tryClearFromLast(s.slots.Length() - 1)
 		if entry != nil {
 			s.slots.MoveBack(entry)
@@ -71,13 +76,13 @@ type StubGroup struct {
 	stubs *list.LinkedList
 }
 
-func NewStubGroup(cap int, stubCount, slotCount int) *StubGroup {
+func NewStubGroup(cap, stubCount, slotCount, checkIntv, minExpiration int) *StubGroup {
 	group := StubGroup{
 		slotCap: cap,
 		stubs: list.New(),
 	}
 	for i := 0; i < stubCount; i++ {
-		group.stubs.Push( NewStub(cap, slotCount) )
+		group.stubs.Push( NewStub(cap, slotCount, checkIntv, minExpiration) )
 	}
 	return &group
 }
