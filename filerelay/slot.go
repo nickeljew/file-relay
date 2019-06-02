@@ -3,49 +3,37 @@ package filerelay
 import (
 	"io"
 	"time"
-	"strings"
-	"fmt"
+	"errors"
+	//"strings"
+	//"fmt"
 )
-
-
-// Error for handling Slot
-type SlotError struct {
-	info string
-}
-
-func (e *SlotError) Error() string {
-	arr := []string{"SlotError: ", e.info,}
-	return strings.Join(arr, "")
-}
 
 
 
 type Slot struct {
-	cap int
+	key string
+	capacity int
 	data []byte
 	used int
 	setAt time.Time
 	duration time.Duration
-
-	minExpiration int
 }
 
-func NewSlot(cap, minExpiration int) *Slot {
-	if minExpiration < SlotMinExpriration {
-		minExpiration = SlotMinExpriration
+func NewSlot(capacity int) (s *Slot) {
+	s = &Slot{
+		capacity: capacity,
+		data: make([]byte, capacity, capacity),
 	}
-	return &Slot{
-		cap: cap,
-		data: make([]byte, cap, cap),
-		minExpiration: minExpiration,
-	}
+
+	return 
 }
 
 func (s *Slot) Cap() int {
-	return s.cap
+	return s.capacity
 }
 
 func (s *Slot) Clear() {
+	s.key = ""
 	s.used = 0
 	s.duration = 0
 }
@@ -72,31 +60,29 @@ func (s *Slot) CheckClear() bool {
 	return ok
 }
 
+func (s *Slot) Key() string {
+	return s.key
+}
+
 func (s *Slot) Data() []byte {
 	return s.data[:s.used]
 }
 
-func (s *Slot) ReadAndSet(r io.Reader, byteLen int, expiration int) (n int, err error) {
+func (s *Slot) ReadAndSet(key string, r io.Reader, byteLen int) (n int, err error) {
 	if s.Occupied() {
-		return 0, &SlotError{"Slot is occupied"}
+		return 0, errors.New("Slot is occupied")
 	}
-	if byteLen > s.cap {
-		return 0, &SlotError{"Invalid byteLen"}
+	if l := len(key); l == 0 || l > KeyMax {
+		return 0, errors.New("key too long")
 	}
-	if expiration < s.minExpiration {
-		return 0, &SlotError{"expiratin too short"}
+	if byteLen > s.capacity {
+		return 0, errors.New("Invalid byteLen")
 	}
 
-	n = 0
-	err = nil
-
+	s.key = key
 	buf := s.data[:byteLen]
 	if n, err = io.ReadFull(r, buf); n > 0 {
 		s.used = n
-		s.setAt = time.Now()
-
-		secs := fmt.Sprintf("%ds", expiration)
-		s.duration, _ = time.ParseDuration(secs)
 	}
 	return
 }

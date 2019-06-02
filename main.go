@@ -25,7 +25,7 @@ func init() {
 
 //
 func main() {
-	fmt.Println("File-Relay server is running...")
+	fmt.Println("File-Relay server is running...\n")
 	//os.Exit(0)
 	os.Exit(filerelay.Start())
 }

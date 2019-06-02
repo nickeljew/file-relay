@@ -145,7 +145,7 @@ func (rl *ReqLine) handleCasCmdParts(parts []string) ([]string, error) {
 
 //
 func ValidKey(key string) bool {
-	if l := len(key); l == 0 || l > 250 {
+	if l := len(key); l == 0 || l > KeyMax {
 		return false
 	}
 	for i := 0; i < len(key); i++ {

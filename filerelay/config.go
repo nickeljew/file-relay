@@ -3,6 +3,8 @@ package filerelay
 const (
 	PORT = "12721"
 	NetType = "tcp"
+
+	KeyMax = 250
 )
 
 type Config struct {

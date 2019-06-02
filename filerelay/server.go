@@ -4,18 +4,23 @@ import (
 	"fmt"
 	"net"
 	"bufio"
+	"sync"
+	"time"
+	//"errors"
+
+	"github.com/huandu/skiplist"
 )
 
 const (
 	szShift = 2
-
+)
+const (
 	//for test
 	sz4B int = 4 << (szShift * iota)
 	sz16B
 	sz64B
-
-	//
-	szKB int = 1024 << (szShift * iota)
+	sz256B
+	szKB
 	sz4KB
 	sz16KB
 	sz64KB
@@ -30,7 +35,7 @@ const (
 
 
 type MemConfig struct {
-	MinExpiration int //in seconds
+	MinExpiration int64 //in seconds
 	StubCheckIntv int //in seconds
 
 	SlotCapMin int //in bytes
@@ -45,8 +50,8 @@ func NewMemConfig() MemConfig {
 		MinExpiration: SlotMinExpriration,
 		StubCheckIntv: StubCheckInterval,
 	
-		SlotCapMin: sz4B,//szKB,
-		SlotCapMax: sz64B,//szMB,
+		SlotCapMin: sz64B,//szKB,
+		SlotCapMax: szKB,//szMB,
 	
 		SlotsInStub: 10,
 		SlubsInGroup: 10,
@@ -63,8 +68,8 @@ type Server struct {
 	quit chan int
 	memCfg MemConfig
 
-	//
-	stubs map[int]*StubGroup
+	entry *itemsEntry
+	groups map[int]*StubGroup
 }
 
 //
@@ -88,7 +93,8 @@ func NewServer(max int, c MemConfig) *Server {
 		hdrNotif: make(chan int),
 		quit: make(chan int),
 		memCfg: c,
-		stubs: make( map[int]*StubGroup ),
+		entry: newItemsEntry(),
+		groups: make( map[int]*StubGroup ),
 	}
 }
 
@@ -107,7 +113,7 @@ func (s *Server) Start() {
 					h.process(makeConn(c))
 				}
 			}
-		case <-s.quit:
+		case <- s.quit:
 			fmt.Println("Quit server")
 			return
 		}
@@ -121,16 +127,29 @@ func (s *Server) Stop() {
 
 //
 func (s *Server) initStubs() {
-	for cap := s.memCfg.SlotCapMin; cap > s.memCfg.SlotCapMax; cap = cap << szShift {
-		s.stubs[cap] = NewStubGroup(cap,
-			s.memCfg.SlubsInGroup, s.memCfg.SlotsInStub,
-			s.memCfg.StubCheckIntv, s.memCfg.MinExpiration)
+	c := s.memCfg.SlotCapMin
+	for {
+		s.groups[c] = NewStubGroup(c,
+			s.memCfg.SlubsInGroup, s.memCfg.SlotsInStub, s.memCfg.StubCheckIntv)
+
+		fmt.Printf("Check group: %d; %d, %v\n", len(s.groups), c, s.groups[c])
+
+		c = c << szShift
+		if (c > s.memCfg.SlotCapMax) {
+			break
+		}
 	}
 }
 
 func (s *Server) clearStubs() {
-	for cap := s.memCfg.SlotCapMin; cap > s.memCfg.SlotCapMax; cap = cap << szShift {
-		s.stubs[cap] = nil
+	c := s.memCfg.SlotCapMin
+	for {
+		s.groups[c] = nil
+
+		c = c << szShift
+		if (c > s.memCfg.SlotCapMax) {
+			break
+		}
 	}
 }
 
@@ -161,7 +180,7 @@ func (s *Server) handleConn(nc net.Conn) error {
 	if hdr == nil {
 		fmt.Println("* Get new handler or wait in line")
 		if cnt < s.max {
-			hdr = newHandler(cnt - 1, s.hdrNotif)
+			hdr = newHandler(cnt - 1, s.hdrNotif, &s.memCfg, s.groups)
 			s.handlers = append(s.handlers, hdr)
 		}
 	}
@@ -174,6 +193,43 @@ func (s *Server) handleConn(nc net.Conn) error {
 	return nil
 }
 
+
+type itemsEntry struct {
+	list *skiplist.SkipList
+	sync.Mutex
+}
+
+func newItemsEntry() *itemsEntry {
+	return &itemsEntry{
+		list: skiplist.New(skiplist.String),
+	}
+}
+
+
+type MetaItem struct {
+	key string
+	flags uint32
+	setAt time.Time
+	duration time.Duration
+	byteLen int
+	slots []*Slot
+}
+
+func newMetaItem(key string, flags uint32, expiration int64, byteLen int) (t *MetaItem) {
+	t = &MetaItem{
+		key: key,
+		flags: flags,
+		setAt: time.Now(),
+		byteLen: byteLen,
+	}
+	secs := fmt.Sprintf("%ds", expiration)
+	t.duration, _ = time.ParseDuration(secs)
+	return
+}
+
+
+
+
 //
 type handler struct {
 	index int
@@ -181,14 +237,19 @@ type handler struct {
 	quit chan int
 	notif chan int
 	running bool
+
+	cfg *MemConfig
+	groups map[int]*StubGroup
 }
 
-func newHandler(idx int, notif chan int) (*handler) {
+func newHandler(idx int, notif chan int, c *MemConfig, groups map[int]*StubGroup) (*handler) {
 	return &handler{
 		index: idx,
 		quit: make(chan int),
 		notif: notif,
 		running: false,
+		cfg: c,
+		groups: groups,
 	}
 }
 
@@ -206,6 +267,13 @@ func (h *handler) process(cn *conn) error {
 	reqline := &ReqLine{}
 	reqline.parseLine(line)
 	fmt.Printf(" - Recv: %T %v\n -\n", reqline, reqline)
+
+	exp := reqline.Expiration
+	if exp < h.cfg.MinExpiration {
+		exp = h.cfg.MinExpiration
+	}
+	item := newMetaItem(reqline.Key, reqline.Flags, exp, reqline.ValueLen)
+	h.allocSlots(item)
 
 	// cnt := 0
 	// for {
@@ -230,5 +298,49 @@ func (h *handler) process(cn *conn) error {
 	h.running = false
 	h.notif <- h.index
 
+	return nil
+}
+
+func (h *handler) allocSlots(t *MetaItem) error {
+	byteLen := t.byteLen
+	c := h.cfg.SlotCapMax
+	for {
+		fmt.Printf("Check stub-groups for capacity: %d; Left-bytes: %d\n", c, byteLen)
+
+		if byteLen > c {
+			rest := byteLen % c
+			cnt := (byteLen - rest) / c
+			byteLen = rest
+			if e := h.findSlots(c, cnt, t); e != nil {
+				return e
+			}
+		}
+
+		c = c >> 2
+		if (c <= h.cfg.SlotCapMin && byteLen > 0) {
+			byteLen = 0
+			if e := h.findSlots(c, 1, t); e != nil {
+				return e
+			}
+		}
+		if byteLen <= 0 {
+			break
+		}
+	}
+	return nil
+}
+
+
+func (h *handler) findSlots(slotCap, cnt int, t *MetaItem) error {
+	group := h.groups[slotCap]
+	if slots, e := group.FindAvailableSlots(cnt); e != nil {
+		if len(t.slots) > 0 {
+			t.slots = append(t.slots, slots...)
+		} else {
+			t.slots = slots
+		}
+	} else {
+		return e
+	}
 	return nil
 }
