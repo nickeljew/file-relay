@@ -9,6 +9,8 @@ import (
 	//"errors"
 
 	"github.com/huandu/skiplist"
+
+	. "github.com/nickeljew/file-relay/debug"
 )
 
 const (
@@ -109,12 +111,12 @@ func (s *Server) Start() {
 				if !h.running {
 					c := s.waitlist[0]
 					s.waitlist = s.waitlist[1:]
-					fmt.Println("* Pop from waitlist for handler: ", i)
+					Debug("* Pop from waitlist for handler: ", i)
 					h.process(makeConn(c))
 				}
 			}
 		case <- s.quit:
-			fmt.Println("Quit server")
+			log.Info("Quit server")
 			return
 		}
 	}
@@ -132,7 +134,7 @@ func (s *Server) initStubs() {
 		s.groups[c] = NewStubGroup(c,
 			s.memCfg.SlubsInGroup, s.memCfg.SlotsInStub, s.memCfg.StubCheckIntv)
 
-		fmt.Printf("Check group: %d; %d, %v\n", len(s.groups), c, s.groups[c])
+		Debugf("Check group: %d; %d, %v", len(s.groups), c, s.groups[c])
 
 		c = c << szShift
 		if (c > s.memCfg.SlotCapMax) {
@@ -157,7 +159,7 @@ func (s *Server) clearStubs() {
 //
 func (s *Server) Handle(nc net.Conn) {
 	if err := s.handleConn(nc); err != nil {
-		fmt.Println("* Error in handling connection: ", err.Error())
+		log.Error("* Error in handling connection: ", err.Error())
 	}
 	nc.Close()
 }
@@ -165,20 +167,20 @@ func (s *Server) Handle(nc net.Conn) {
 //
 func (s *Server) handleConn(nc net.Conn) error {
 	cnt := len(s.handlers)
-	fmt.Println("* Running handlers: ", cnt)
+	Debug("* Running handlers: ", cnt)
 
 	var hdr *handler
 
 	for i, h := range s.handlers {
 		if (h != nil && !h.running) {
-			fmt.Println("** Using handler: ", i)
+			Debug("** Using handler: ", i)
 			hdr = h
 			break
 		}
 	}
 
 	if hdr == nil {
-		fmt.Println("* Get new handler or wait in line")
+		Debug("* Get new handler or wait in line")
 		if cnt < s.max {
 			hdr = newHandler(cnt - 1, s.hdrNotif, &s.memCfg, s.groups)
 			s.handlers = append(s.handlers, hdr)
@@ -254,7 +256,7 @@ func newHandler(idx int, notif chan int, c *MemConfig, groups map[int]*StubGroup
 }
 
 func (h *handler) process(cn *conn) error {
-	//fmt.Println("Nothing here in handler...")
+	//Debug("Nothing here in handler...")
 
 	h.running = true
 	//h.cn = c
@@ -266,7 +268,7 @@ func (h *handler) process(cn *conn) error {
 
 	reqline := &ReqLine{}
 	reqline.parseLine(line)
-	fmt.Printf(" - Recv: %T %v\n -\n", reqline, reqline)
+	Debugf(" - Recv: %T %v\n -\n", reqline, reqline)
 
 	exp := reqline.Expiration
 	if exp < h.cfg.MinExpiration {
@@ -305,7 +307,7 @@ func (h *handler) allocSlots(t *MetaItem) error {
 	byteLen := t.byteLen
 	c := h.cfg.SlotCapMax
 	for {
-		fmt.Printf("Check stub-groups for capacity: %d; Left-bytes: %d\n", c, byteLen)
+		Debugf("Check stub-groups for capacity: %d; Left-bytes: %d\n", c, byteLen)
 
 		if byteLen > c {
 			rest := byteLen % c

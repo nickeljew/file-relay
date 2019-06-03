@@ -1,10 +1,36 @@
 package filerelay
 
 import (
-	"fmt"
 	"net"
+	"os"
+	//"fmt"
 	//"bufio"
+
+	"github.com/sirupsen/logrus"
 )
+
+
+var (
+	logger = logrus.New()
+	log = logger.WithFields(logrus.Fields{
+		"name": "filerelay",
+	})
+)
+
+
+//
+func init() {
+	// Log as JSON instead of the default ASCII formatter.
+	logger.SetFormatter(&logrus.JSONFormatter{})
+  
+	// Output to stdout instead of the default stderr
+	// Can be any io.Writer, see below for File example
+	logger.SetOutput(os.Stdout)
+  
+	// Only log the warning severity or above.
+	logger.SetLevel(logrus.InfoLevel)
+}
+
 
 
 //
@@ -37,9 +63,10 @@ func Start() int {
 	cfg, _ := InitConfig()
 	lis, err := net.Listen(cfg.networkType, cfg.Addr())
 	if err != nil {
-		fmt.Println("Error listening: ", err.Error())
+		log.Error("Error listening: ", err.Error())
 		return 1
 	}
+	log.Info("Server is listening at: ", cfg.Addr())
 	defer lis.Close()
 
 	memCfg := NewMemConfig()
@@ -52,11 +79,11 @@ func Start() int {
         // Listen for an incoming connection.
         conn, err := lis.Accept()
         if err != nil {
-            fmt.Println("Error accepting: ", err.Error())
+            log.Error("Error accepting: ", err.Error())
             return 1
         }
 		// Handle connections in a new goroutine.
-		fmt.Println("# New incoming connection")
+		log.Info("# New incoming connection")
         go server.Handle(conn)
     }
 
