@@ -9,7 +9,6 @@ import (
 	//"errors"
 
 	"github.com/huandu/skiplist"
-
 	. "github.com/nickeljew/file-relay/debug"
 )
 
@@ -223,6 +222,7 @@ func newMetaItem(key string, flags uint32, expiration int64, byteLen int) (t *Me
 		flags: flags,
 		setAt: time.Now(),
 		byteLen: byteLen,
+		//slots: make([]*Slot),
 	}
 	secs := fmt.Sprintf("%ds", expiration)
 	t.duration, _ = time.ParseDuration(secs)
@@ -277,6 +277,16 @@ func (h *handler) process(cn *conn) error {
 	item := newMetaItem(reqline.Key, reqline.Flags, exp, reqline.ValueLen)
 	h.allocSlots(item)
 
+	var i, c int
+	for _, s := range item.slots {
+		if c != s.capacity {
+			c = s.capacity
+			i = 1
+		}
+		Debugf("- Slot[%d]: %d", s.capacity, i)
+		i++
+	}
+
 	// cnt := 0
 	// for {
 	// 	data, err := cn.rw.ReadSlice('\n')
@@ -307,27 +317,25 @@ func (h *handler) allocSlots(t *MetaItem) error {
 	byteLen := t.byteLen
 	c := h.cfg.SlotCapMax
 	for {
-		Debugf("Check stub-groups for capacity: %d; Left-bytes: %d\n", c, byteLen)
+		//Debugf("Check stub-groups for capacity: %d; Left-bytes: %d", c, byteLen)
 
 		if byteLen > c {
 			rest := byteLen % c
 			cnt := (byteLen - rest) / c
 			byteLen = rest
+			if c == h.cfg.SlotCapMin {
+				byteLen = 0
+				cnt++
+			}
 			if e := h.findSlots(c, cnt, t); e != nil {
 				return e
 			}
 		}
 
-		c = c >> 2
-		if (c <= h.cfg.SlotCapMin && byteLen > 0) {
-			byteLen = 0
-			if e := h.findSlots(c, 1, t); e != nil {
-				return e
-			}
-		}
 		if byteLen <= 0 {
 			break
 		}
+		c = c >> 2
 	}
 	return nil
 }
@@ -335,7 +343,7 @@ func (h *handler) allocSlots(t *MetaItem) error {
 
 func (h *handler) findSlots(slotCap, cnt int, t *MetaItem) error {
 	group := h.groups[slotCap]
-	if slots, e := group.FindAvailableSlots(cnt); e != nil {
+	if slots, e := group.FindAvailableSlots(cnt); e == nil {
 		if len(t.slots) > 0 {
 			t.slots = append(t.slots, slots...)
 		} else {

@@ -4,9 +4,10 @@ import (
 	"time"
 	"sync"
 	"errors"
-	"fmt"
+	//"fmt"
 
 	"github.com/nickeljew/file-relay/list"
+	. "github.com/nickeljew/file-relay/debug"
 )
 
 const (
@@ -108,24 +109,29 @@ func (g *StubGroup) SlotSum() int {
 	return g.slotCount * g.stubs.Length()
 }
 
-func (g *StubGroup) FindAvailableSlots(cnt int) (s []*Slot, e error) {
-	if cnt > g.SlotSum() {
+func (g *StubGroup) FindAvailableSlots(need int) (s []*Slot, e error) {
+	if need > g.SlotSum() {
 		return nil, errors.New("Too many slots to request")
 	}
 
-	s = make([]*Slot, 0, cnt)
+	s = make([]*Slot, 0, need)
 	result := make(StubCh)
-	conc, did, chkCnt, chkMax := stubsCheckConc, 0, 0, g.stubs.Length()
+	conc, did, cnt, left := stubsCheckConc, 0, need, g.stubs.Length()
+	if conc > need {
+		conc = need
+	}
+	//Debugf("-- Find for Cap: %d - Need: %d, Total: %d", g.slotCap, need, left)
+
+	ForEnd:
 	for {
-		did, cnt = g.doCheck(conc, cnt, result)
-		if did <= 0 || cnt <= 0 {
-			return
+		if cnt > 0 && left > 0 {
+			did, left = g.doCheck(conc, left, result)
+			cnt -= did
 		}
 
 		select {
 		case stub := <- result:
 			conc = 1
-			chkCnt++
 			if stub == nil {
 				continue
 			}
@@ -133,14 +139,20 @@ func (g *StubGroup) FindAvailableSlots(cnt int) (s []*Slot, e error) {
 			if slot != nil {
 				s = append(s, slot)
 			}
-			fmt.Printf("-- For Cap: %d - Left: %d, Slots: %d\n", g.slotCap, cnt, len(s))
-		}
+			//Debugf("-- Next for Cap: %d - Need-left: %d, Slots: %d", g.slotCap, cnt, len(s))
 
-		if chkCnt >= chkMax && cnt > 0 {
-			e = errors.New("No enough slots")
-			return
+			if len(s) >= need {
+				//break //Fuck there! can't break the loop inside select
+				break ForEnd
+			}
 		}
 	}
+
+	if cnt > 0 {
+		e = errors.New("No enough slots")
+	}
+	Debugf("-- finished for Cap: %d - got: %d, Total-slots-left: %d", g.slotCap, len(s), left)
+	return
 }
 
 func (g *StubGroup) doCheck(conc, total int, r StubCh) (did, left int) {
