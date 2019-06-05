@@ -8,6 +8,8 @@ import (
 	"time"
 	//"errors"
 
+	"github.com/sirupsen/logrus"
+
 	"github.com/huandu/skiplist"
 	. "github.com/nickeljew/file-relay/debug"
 )
@@ -277,14 +279,19 @@ func (h *handler) process(cn *conn) error {
 	item := newMetaItem(reqline.Key, reqline.Flags, exp, reqline.ValueLen)
 	h.allocSlots(item)
 
-	var i, c int
-	for _, s := range item.slots {
-		if c != s.capacity {
-			c = s.capacity
-			i = 1
+	bytesLeft := reqline.ValueLen
+	for i, s := range item.slots {
+		Debugf("- Slot[%d]: %d, byte-left: %d", s.capacity, i, bytesLeft)
+
+		if n, e := s.ReadAndSet(reqline.Key, cn.rw, bytesLeft); e != nil {
+			log.WithFields(logrus.Fields{
+				"bytesLeft": bytesLeft,
+				"valueLen": reqline.ValueLen,
+			}).Error(err.Error())
+			break
+		} else {
+			bytesLeft -= n
 		}
-		Debugf("- Slot[%d]: %d", s.capacity, i)
-		i++
 	}
 
 	// cnt := 0

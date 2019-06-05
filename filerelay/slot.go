@@ -76,7 +76,8 @@ func (s *Slot) ReadAndSet(key string, r io.Reader, byteLen int) (n int, err erro
 		return 0, errors.New("key too long")
 	}
 	if byteLen > s.capacity {
-		return 0, errors.New("Invalid byteLen")
+		//return 0, errors.New("Invalid byteLen")
+		byteLen = s.capacity
 	}
 
 	s.key = key
