@@ -1,16 +1,11 @@
 package filerelay
 
 import (
-	"fmt"
-	"net"
 	"bufio"
-	"sync"
-	"time"
-	//"errors"
+	"net"
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/huandu/skiplist"
 	. "github.com/nickeljew/file-relay/debug"
 )
 
@@ -53,11 +48,11 @@ func NewMemConfig() MemConfig {
 		MinExpiration: SlotMinExpriration,
 		StubCheckIntv: StubCheckInterval,
 	
-		SlotCapMin: sz64B,//szKB,
-		SlotCapMax: szKB,//szMB,
+		SlotCapMin: ValFrom(sz64B, szKB).(int),
+		SlotCapMax: ValFrom(szKB, szMB).(int),
 	
-		SlotsInStub: 10,
-		SlubsInGroup: 10,
+		SlotsInStub: ValFrom(10, 100).(int),
+		SlubsInGroup: ValFrom(10, 100).(int),
 	}
 }
 
@@ -71,7 +66,7 @@ type Server struct {
 	quit chan int
 	memCfg MemConfig
 
-	entry *itemsEntry
+	entry *ItemsEntry
 	groups map[int]*StubGroup
 }
 
@@ -96,7 +91,7 @@ func NewServer(max int, c MemConfig) *Server {
 		hdrNotif: make(chan int),
 		quit: make(chan int),
 		memCfg: c,
-		entry: newItemsEntry(),
+		entry: NewItemsEntry(),
 		groups: make( map[int]*StubGroup ),
 	}
 }
@@ -113,7 +108,9 @@ func (s *Server) Start() {
 					c := s.waitlist[0]
 					s.waitlist = s.waitlist[1:]
 					Debug("* Pop from waitlist for handler: ", i)
-					h.process(makeConn(c))
+					if e := h.process(makeConn(c)); e != nil {
+						log.Error("Failed to process connection: ", e.Error())
+					}
 				}
 			}
 		case <- s.quit:
@@ -138,7 +135,7 @@ func (s *Server) initStubs() {
 		Debugf("Check group: %d; %d, %v", len(s.groups), c, s.groups[c])
 
 		c = c << szShift
-		if (c > s.memCfg.SlotCapMax) {
+		if c > s.memCfg.SlotCapMax {
 			break
 		}
 	}
@@ -150,7 +147,7 @@ func (s *Server) clearStubs() {
 		s.groups[c] = nil
 
 		c = c << szShift
-		if (c > s.memCfg.SlotCapMax) {
+		if c > s.memCfg.SlotCapMax {
 			break
 		}
 	}
@@ -173,7 +170,7 @@ func (s *Server) handleConn(nc net.Conn) error {
 	var hdr *handler
 
 	for i, h := range s.handlers {
-		if (h != nil && !h.running) {
+		if h != nil && !h.running {
 			Debug("** Using handler: ", i)
 			hdr = h
 			break
@@ -197,47 +194,11 @@ func (s *Server) handleConn(nc net.Conn) error {
 }
 
 
-type itemsEntry struct {
-	list *skiplist.SkipList
-	sync.Mutex
-}
-
-func newItemsEntry() *itemsEntry {
-	return &itemsEntry{
-		list: skiplist.New(skiplist.String),
-	}
-}
-
-
-type MetaItem struct {
-	key string
-	flags uint32
-	setAt time.Time
-	duration time.Duration
-	byteLen int
-	slots []*Slot
-}
-
-func newMetaItem(key string, flags uint32, expiration int64, byteLen int) (t *MetaItem) {
-	t = &MetaItem{
-		key: key,
-		flags: flags,
-		setAt: time.Now(),
-		byteLen: byteLen,
-		//slots: make([]*Slot),
-	}
-	secs := fmt.Sprintf("%ds", expiration)
-	t.duration, _ = time.ParseDuration(secs)
-	return
-}
-
-
-
 
 //
 type handler struct {
 	index int
-	//cn *conn
+
 	quit chan int
 	notif chan int
 	running bool
@@ -261,64 +222,82 @@ func (h *handler) process(cn *conn) error {
 	//Debug("Nothing here in handler...")
 
 	h.running = true
-	//h.cn = c
 
-	line, err := cn.rw.ReadSlice('\n')
-	if err != nil {
-		return err
+	//done and notif
+	fulfill := func() {
+		h.running = false
+		h.notif <- h.index
+	}
+	defer fulfill()
+
+	line, e := cn.rw.ReadSlice('\n')
+	if e != nil {
+		return e
 	}
 
 	reqline := &ReqLine{}
 	reqline.parseLine(line)
-	Debugf(" - Recv: %T %v\n -\n", reqline, reqline)
+	Debugf(" - Recv: %T %v\n\n", reqline, reqline)
+
+	var storeCmds = map[string]bool{
+		"set": true,
+		"add": true,
+		"replace": true,
+	}
+	if storeCmds[reqline.Cmd] {
+		if e := h.handleStore(reqline, cn.rw); e != nil {
+			return e
+		}
+	} else if reqline.Cmd == "get" {
+		//
+	}
+
+	return nil
+}
+
+
+
+func (h *handler) handleStore(reqline *ReqLine, rw *bufio.ReadWriter) error {
+	_log := log.WithFields(logrus.Fields{
+		"cmd": reqline.Cmd,
+		"itemKey": reqline.Key,
+		"valueLen": reqline.ValueLen,
+	})
 
 	exp := reqline.Expiration
 	if exp < h.cfg.MinExpiration {
 		exp = h.cfg.MinExpiration
 	}
-	item := newMetaItem(reqline.Key, reqline.Flags, exp, reqline.ValueLen)
-	h.allocSlots(item)
+
+	item := NewMetaItem(reqline.Key, reqline.Flags, exp, reqline.ValueLen)
+	//
+
+	if e := h.allocSlots(item); e != nil {
+		_log.Error(e.Error())
+	}
 
 	bytesLeft := reqline.ValueLen
 	for i, s := range item.slots {
-		Debugf("- Slot[%d]: %d, byte-left: %d", s.capacity, i, bytesLeft)
+		Debugf(" - Slot[%d]: %d, byte-left: %d", s.capacity, i, bytesLeft)
 
-		if n, e := s.ReadAndSet(reqline.Key, cn.rw, bytesLeft); e != nil {
-			log.WithFields(logrus.Fields{
-				"bytesLeft": bytesLeft,
-				"valueLen": reqline.ValueLen,
-			}).Error(err.Error())
+		s.SetInfoWithItem(item)
+		if n, e := s.ReadAndSet(reqline.Key, rw, bytesLeft); e != nil {
+			_log.Error(e.Error())
 			break
 		} else {
 			bytesLeft -= n
 		}
 	}
 
-	// cnt := 0
-	// for {
-	// 	data, err := cn.rw.ReadSlice('\n')
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	cnt += len(data)
-	// 	if (cnt < reqline.ValueLen) {
-	// 		//
-	// 	}
-	// }
-
-	if _, err = cn.rw.Write(ResultStored); err != nil {
+	if _, err := rw.Write(ResultStored); err != nil {
 		return err
 	}
-	if err := cn.rw.Flush(); err != nil {
+	if err := rw.Flush(); err != nil {
 		return err
 	}
-
-	//done and notif
-	h.running = false
-	h.notif <- h.index
-
 	return nil
 }
+
 
 func (h *handler) allocSlots(t *MetaItem) error {
 	byteLen := t.byteLen

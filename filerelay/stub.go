@@ -1,13 +1,12 @@
 package filerelay
 
 import (
-	"time"
-	"sync"
 	"errors"
-	//"fmt"
+	"sync"
+	"time"
 
-	"github.com/nickeljew/file-relay/list"
 	. "github.com/nickeljew/file-relay/debug"
+	"github.com/nickeljew/file-relay/list"
 )
 
 const (
@@ -24,7 +23,7 @@ type Stub struct {
 }
 
 func NewStub(slotCap, slotCount, checkIntv int) *Stub {
-	if (checkIntv < StubCheckInterval) {
+	if checkIntv < StubCheckInterval {
 		checkIntv = StubCheckInterval
 	}
 	stub := Stub{
@@ -111,7 +110,7 @@ func (g *StubGroup) SlotSum() int {
 
 func (g *StubGroup) FindAvailableSlots(need int) (s []*Slot, e error) {
 	if need > g.SlotSum() {
-		return nil, errors.New("Too many slots to request")
+		return nil, errors.New("too many slots to request")
 	}
 
 	s = make([]*Slot, 0, need)
@@ -149,9 +148,9 @@ func (g *StubGroup) FindAvailableSlots(need int) (s []*Slot, e error) {
 	}
 
 	if cnt > 0 {
-		e = errors.New("No enough slots")
+		e = errors.New("no enough slots")
 	}
-	Debugf("-- finished for Cap: %d - got: %d, Total-slots-left: %d", g.slotCap, len(s), left)
+	Debugf(" - finished for Cap: %d - got: %d, Total-slots-left: %d", g.slotCap, len(s), left)
 	return
 }
 
@@ -176,14 +175,3 @@ func (g *StubGroup) getStubForCheck(r StubCh) {
 	g.stubs.MoveBack(entry)
 	r <- stub
 }
-
-// func (g *StubGroup) checkStubForAvailableSlot(r chan *Slot) {
-// 	g.Lock()
-// 	defer g.Unlock()
-	
-// 	entry := g.stubs.GetFirst()
-// 	stub := entry.Value().(*Stub)
-// 	slot := stub.FindAvailableSlot()
-// 	g.stubs.MoveBack(entry)
-// 	r <- slot
-// }

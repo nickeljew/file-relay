@@ -3,8 +3,6 @@ package filerelay
 import (
 	"net"
 	"os"
-	//"fmt"
-	//"bufio"
 
 	"github.com/sirupsen/logrus"
 )

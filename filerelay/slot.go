@@ -1,11 +1,9 @@
 package filerelay
 
 import (
+	"errors"
 	"io"
 	"time"
-	"errors"
-	//"strings"
-	//"fmt"
 )
 
 
@@ -68,9 +66,14 @@ func (s *Slot) Data() []byte {
 	return s.data[:s.used]
 }
 
+func (s *Slot) SetInfoWithItem(t *MetaItem) {
+	s.setAt = t.setAt
+	s.duration = t.duration
+}
+
 func (s *Slot) ReadAndSet(key string, r io.Reader, byteLen int) (n int, err error) {
 	if s.Occupied() {
-		return 0, errors.New("Slot is occupied")
+		return 0, errors.New("slot is occupied")
 	}
 	if l := len(key); l == 0 || l > KeyMax {
 		return 0, errors.New("key too long")

@@ -16,3 +16,9 @@ func Debugf(s string, a ...interface{}) {
 	fmt.Printf(s, a...)
 	fmt.Println()
 }
+
+
+//
+func ValFrom(deb, rel interface{}) interface{} {
+	return deb
+}
