@@ -1,5 +1,10 @@
 package filerelay
 
+import (
+	"math/rand"
+	"strconv"
+	"time"
+)
 
 const (
 	PORT = "12721"
@@ -7,6 +12,12 @@ const (
 
 	KeyMax = 250
 )
+
+
+func init() {
+	rand.Seed(time.Now().Unix())
+}
+
 
 type Config struct {
 	host        string
@@ -19,4 +30,13 @@ type Config struct {
 
 func (c *Config) Addr() string {
 	return c.host + ":" + c.port
+}
+
+
+func RandomNum(min, max int) int {
+	return rand.Intn(max-min) + min
+}
+
+func RandomStr(min, max int) string {
+	return strconv.Itoa(RandomNum(min, max))
 }

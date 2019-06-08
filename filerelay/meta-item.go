@@ -7,8 +7,9 @@ import (
 	"time"
 
 	//"github.com/sirupsen/logrus"
-
 	"github.com/huandu/skiplist"
+
+	. "github.com/nickeljew/file-relay/debug"
 )
 
 
@@ -53,14 +54,77 @@ func (t *MetaItem) Expired() bool {
 //
 type ItemsEntry struct {
 	list *skiplist.SkipList
+	checkpoint *skiplist.Element
+	checkAt time.Time
+	checkSteps int
+	quit chan byte
 	sync.Mutex
 }
 
-func NewItemsEntry() *ItemsEntry {
+func NewItemsEntry(checkSteps int) *ItemsEntry {
 	return &ItemsEntry{
 		list: skiplist.New(skiplist.String),
+		checkSteps: checkSteps,
+		quit: make(chan byte),
 	}
 }
+
+
+func (e *ItemsEntry) StartCheck() {
+	t := time.NewTicker(time.Second * 60)
+
+	for {
+		select {
+		case <-t.C:
+			e.ScheduledCheck()
+		case <- e.quit:
+			log.Info("Quit ItemsEntry")
+			return
+		}
+	}
+}
+
+func (e *ItemsEntry) StopCheck() {
+	e.quit <- 0
+}
+
+func (e *ItemsEntry) ScheduledCheck() {
+	if e.checkpoint == nil {
+		e.checkpoint = e.list.Front()
+	}
+
+	e.Lock()
+	defer e.Unlock()
+
+	steps := e.checkSteps
+	if l := e.list.Len(); l < steps {
+		Debug("ItemsEntry len: ", l)
+		steps = l
+	}
+
+	for {
+		item := e.checkpoint.Value.(*MetaItem)
+		Debugf("ItemsEntry check steps: %d; key: %s", steps, item.key)
+		expired := item.Expired()
+
+		e.checkpoint = e.checkpoint.Next()
+		if e.checkpoint == nil {
+			e.checkpoint = e.list.Front()
+		}
+
+		if expired {
+			_ = e.remove(item.key,true)
+		}
+
+		steps--
+		if steps == 0 {
+			e.checkAt = time.Now()
+			return
+		}
+	}
+
+}
+
 
 func (e *ItemsEntry) get(key string) *MetaItem {
 	elem := e.list.Get(key)
@@ -105,6 +169,9 @@ func (e *ItemsEntry) Get(key string) *MetaItem {
 
 
 func (e *ItemsEntry) Set(t *MetaItem) error {
+	e.Lock()
+	defer e.Unlock()
+
 	if elem := e.replace(t); elem != nil {
 		return nil
 	} else if elem = e.list.Set(t.key, t); elem != nil {
@@ -115,6 +182,9 @@ func (e *ItemsEntry) Set(t *MetaItem) error {
 
 
 func (e *ItemsEntry) Add(t *MetaItem) error {
+	e.Lock()
+	defer e.Unlock()
+
 	if elem := e.list.Get(t.key); elem != nil {
 		return errors.New("key already exists")
 	} else if elem = e.list.Set(t.key, t); elem != nil {
@@ -125,6 +195,9 @@ func (e *ItemsEntry) Add(t *MetaItem) error {
 
 
 func (e *ItemsEntry) Replace(t *MetaItem) error {
+	e.Lock()
+	defer e.Unlock()
+
 	if elem := e.replace(t); elem != nil {
 		return nil
 	}

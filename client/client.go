@@ -6,12 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
-	"math/rand"
 	"net"
 	"os"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/nickeljew/file-relay/filerelay"
 )
@@ -46,8 +43,6 @@ var (
 //
 func main() {
 	fmt.Println("File-Relay client")
-
-	rand.Seed(time.Now().Unix())
 
 	doConcurrentSet(1)
 	
@@ -116,7 +111,7 @@ func trySet(client *Client) error {
 	reqValue, err := ioutil.ReadFile("./test.txt")
 	reqline := &filerelay.ReqLine{
 		Cmd: "set",
-		Key: "test123" + strconv.Itoa(random(10, 50)),
+		Key: "test123" + filerelay.RandomStr(10, 50),
 		ValueLen: len(reqValue),
 		Flags: 1,
 		Expiration: 1800,
@@ -143,7 +138,7 @@ func trySet(client *Client) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("Response from server:", strings.Trim(string(line), " \r\n"))
+	fmt.Println("Response from server:", strings.Trim(string(line)," \r\n"))
 
 	switch {
 	case bytes.Equal(line, filerelay.ResultStored):
@@ -156,10 +151,5 @@ func trySet(client *Client) error {
 		return ErrCacheMiss
 	}
 
-	return fmt.Errorf("Unexpected response line from %q: %q", reqline.Cmd, string(line))
-}
-
-
-func random(min, max int) int {
-	return rand.Intn(max-min) + min
+	return fmt.Errorf("unexpected response line from %q: %q", reqline.Cmd, string(line))
 }

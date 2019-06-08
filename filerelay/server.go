@@ -33,6 +33,8 @@ const (
 
 
 type MemConfig struct {
+	SkipListCheckStep int
+
 	MinExpiration int64 //in seconds
 	StubCheckIntv int //in seconds
 
@@ -45,6 +47,8 @@ type MemConfig struct {
 
 func NewMemConfig() MemConfig {
 	return MemConfig{
+		SkipListCheckStep: 100,
+
 		MinExpiration: SlotMinExpriration,
 		StubCheckIntv: StubCheckInterval,
 	
@@ -63,7 +67,7 @@ type Server struct {
 	handlers []*handler
 	waitlist []net.Conn
 	hdrNotif chan int
-	quit chan int
+	quit chan byte
 	memCfg MemConfig
 
 	entry *ItemsEntry
@@ -89,15 +93,16 @@ func NewServer(max int, c MemConfig) *Server {
 		max: max,
 		handlers: make([]*handler, 0, max),
 		hdrNotif: make(chan int),
-		quit: make(chan int),
+		quit: make(chan byte),
 		memCfg: c,
-		entry: NewItemsEntry(),
+		entry: NewItemsEntry(c.SkipListCheckStep),
 		groups: make( map[int]*StubGroup ),
 	}
 }
 
 func (s *Server) Start() {
 	s.initStubs()
+	s.entry.StartCheck()
 	var i int
 	for {
 		select {
@@ -115,12 +120,16 @@ func (s *Server) Start() {
 			}
 		case <- s.quit:
 			log.Info("Quit server")
+			for _, h := range s.handlers {
+				h.quit <- 0
+			}
 			return
 		}
 	}
 }
 
 func (s *Server) Stop() {
+	s.entry.StopCheck()
 	s.quit <- 0
 	s.clearStubs()
 }
@@ -157,9 +166,11 @@ func (s *Server) clearStubs() {
 //
 func (s *Server) Handle(nc net.Conn) {
 	if err := s.handleConn(nc); err != nil {
-		log.Error("* Error in handling connection: ", err.Error())
+		log.Error("error in handling connection: ", err.Error())
 	}
-	nc.Close()
+	if err := nc.Close(); err != nil {
+		log.Error("error in closing connection")
+	}
 }
 
 //
@@ -199,7 +210,7 @@ func (s *Server) handleConn(nc net.Conn) error {
 type handler struct {
 	index int
 
-	quit chan int
+	quit chan byte
 	notif chan int
 	running bool
 
@@ -210,7 +221,7 @@ type handler struct {
 func newHandler(idx int, notif chan int, c *MemConfig, groups map[int]*StubGroup) (*handler) {
 	return &handler{
 		index: idx,
-		quit: make(chan int),
+		quit: make(chan byte),
 		notif: notif,
 		running: false,
 		cfg: c,
