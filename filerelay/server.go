@@ -34,6 +34,7 @@ const (
 
 type MemConfig struct {
 	SkipListCheckStep int
+	//SkipListCheckIntv int //in seconds
 
 	MinExpiration int64 //in seconds
 	StubCheckIntv int //in seconds
@@ -48,6 +49,7 @@ type MemConfig struct {
 func NewMemConfig() MemConfig {
 	return MemConfig{
 		SkipListCheckStep: 100,
+		//SkipListCheckIntv: 60,
 
 		MinExpiration: SlotMinExpriration,
 		StubCheckIntv: StubCheckInterval,

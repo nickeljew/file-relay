@@ -12,7 +12,7 @@ const (
 var itemsEntry *ItemsEntry
 
 func init() {
-	itemsEntry = NewItemsEntry(itemCount)
+	itemsEntry = NewItemsEntry(2)
 }
 
 
@@ -30,7 +30,23 @@ func TestItemsEntry_Add(t *testing.T) {
 	}
 }
 
+func TestItemsEntry_Remove(t *testing.T) {
+	front := itemsEntry.list.Front()
+	frontKey := front.Key().(string)
+	t.Log("Front element key: ", frontKey)
+
+	itemsEntry.checkpoint = front
+	item := itemsEntry.checkpoint.Value.(*MetaItem)
+
+	item2 := itemsEntry.Remove(item.key)
+	t.Log("Current checkpoint key: ", itemsEntry.checkpoint.Key().(string), "; item: ", item2)
+}
+
 // to ensure the checking will go through all items in skip-list
 func TestItemsEntry_ScheduledCheck(t *testing.T) {
+	itemsEntry.ScheduledCheck()
+	itemsEntry.ScheduledCheck()
+	itemsEntry.ScheduledCheck()
+	itemsEntry.ScheduledCheck()
 	itemsEntry.ScheduledCheck()
 }

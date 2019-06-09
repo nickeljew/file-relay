@@ -134,16 +134,16 @@ func (e *ItemsEntry) get(key string) *MetaItem {
 	return elem.Value.(*MetaItem)
 }
 
-func (e *ItemsEntry) remove(key string, clear bool) *MetaItem {
+func (e *ItemsEntry) remove(key string, clear bool) *skiplist.Element {
 	elem := e.list.Remove(key)
 	if elem == nil {
 		return nil
 	}
-	t := elem.Value.(*MetaItem)
 	if clear == true {
+		t := elem.Value.(*MetaItem)
 		t.ClearSlots()
 	}
-	return t
+	return elem
 }
 
 func (e *ItemsEntry) replace(t *MetaItem) *skiplist.Element {
@@ -157,12 +157,34 @@ func (e *ItemsEntry) replace(t *MetaItem) *skiplist.Element {
 }
 
 
-
 func (e *ItemsEntry) Get(key string) *MetaItem {
 	t := e.get(key)
 	if t != nil && t.Expired() {
-		e.remove(key,true)
+		_ = e.remove(key,true)
 		return nil
+	}
+	return t
+}
+
+
+func (e *ItemsEntry) Remove(key string) *MetaItem {
+	e.Lock()
+	defer e.Unlock()
+
+	elem := e.remove(key,true)
+	if elem == nil {
+		return nil
+	}
+	t := elem.Value.(*MetaItem)
+	if e.checkpoint == nil {
+		return t
+	}
+
+	k := e.checkpoint.Key().(string)
+	Debug("Current checkpoint key: ", k)
+	if k == t.key {
+		e.checkpoint = e.checkpoint.Next()
+		Debug("After removed, checkpoint key: ", e.checkpoint.Key().(string))
 	}
 	return t
 }
