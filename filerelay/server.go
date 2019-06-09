@@ -2,6 +2,7 @@ package filerelay
 
 import (
 	"bufio"
+	"fmt"
 	"net"
 
 	"github.com/sirupsen/logrus"
@@ -115,8 +116,8 @@ func (s *Server) Start() {
 					c := s.waitlist[0]
 					s.waitlist = s.waitlist[1:]
 					Debug("* Pop from waitlist for handler: ", i)
-					if e := h.process(makeConn(c)); e != nil {
-						log.Error("Failed to process connection: ", e.Error())
+					if e := h.process(makeConn(c), s.entry); e != nil {
+						log.Error("failed to process connection: ", e.Error())
 					}
 				}
 			}
@@ -199,7 +200,7 @@ func (s *Server) handleConn(nc net.Conn) error {
 	}
 
 	if hdr != nil {
-		return hdr.process(makeConn(nc))
+		return hdr.process(makeConn(nc), s.entry)
 	}
 
 	s.waitlist = append(s.waitlist, nc)
@@ -231,7 +232,7 @@ func newHandler(idx int, notif chan int, c *MemConfig, groups map[int]*StubGroup
 	}
 }
 
-func (h *handler) process(cn *conn) error {
+func (h *handler) process(cn *conn, entry *ItemsEntry) error {
 	//Debug("Nothing here in handler...")
 
 	h.running = true
@@ -258,11 +259,13 @@ func (h *handler) process(cn *conn) error {
 		"replace": true,
 	}
 	if storeCmds[reqline.Cmd] {
-		if e := h.handleStore(reqline, cn.rw); e != nil {
+		if e := h.handleStorage(reqline, cn.rw, entry); e != nil {
 			return e
 		}
 	} else if reqline.Cmd == "get" {
-		//
+		if e := h.handleRetrieval(reqline, cn.rw, entry); e != nil {
+			return e
+		}
 	}
 
 	return nil
@@ -270,7 +273,7 @@ func (h *handler) process(cn *conn) error {
 
 
 
-func (h *handler) handleStore(reqline *ReqLine, rw *bufio.ReadWriter) error {
+func (h *handler) handleStorage(reqline *ReqLine, rw *bufio.ReadWriter, entry *ItemsEntry) error {
 	_log := log.WithFields(logrus.Fields{
 		"cmd": reqline.Cmd,
 		"itemKey": reqline.Key,
@@ -282,8 +285,31 @@ func (h *handler) handleStore(reqline *ReqLine, rw *bufio.ReadWriter) error {
 		exp = h.cfg.MinExpiration
 	}
 
+	makeResp := func(cmd []byte) error {
+		if _, e := rw.Write(cmd); e != nil {
+			return e
+		}
+		if e := rw.Flush(); e != nil {
+			return e
+		}
+		return nil
+	}
+
 	item := NewMetaItem(reqline.Key, reqline.Flags, exp, reqline.ValueLen)
-	//
+	var err error
+	switch reqline.Cmd {
+	case "set":
+		err = entry.Set(item)
+	case "add":
+		err = entry.Add(item)
+	case "replace":
+		err = entry.Replace(item)
+	}
+	if err != nil {
+		if e := makeResp(ResultNotStored); e != nil {
+			return e
+		}
+	}
 
 	if e := h.allocSlots(item); e != nil {
 		_log.Error(e.Error())
@@ -302,11 +328,8 @@ func (h *handler) handleStore(reqline *ReqLine, rw *bufio.ReadWriter) error {
 		}
 	}
 
-	if _, err := rw.Write(ResultStored); err != nil {
-		return err
-	}
-	if err := rw.Flush(); err != nil {
-		return err
+	if e := makeResp(ResultStored); e != nil {
+		return e
 	}
 	return nil
 }
@@ -353,3 +376,38 @@ func (h *handler) findSlots(slotCap, cnt int, t *MetaItem) error {
 	}
 	return nil
 }
+
+
+func (h *handler) handleRetrieval(reqline *ReqLine, rw *bufio.ReadWriter, entry *ItemsEntry) error {
+	//_log := log.WithFields(logrus.Fields{
+	//	"cmd": reqline.Cmd,
+	//	"itemKey": reqline.Key,
+	//})
+
+	item := entry.Get(reqline.Key)
+	if item == nil {
+		item = NewMetaItem(reqline.Key, 0, 0, 0)
+		if e := h.respItemLine(item, rw); e != nil {
+			return e
+		}
+	}
+
+	//TODO: get value block and end with \r\n
+
+	if _, err := rw.Write(ResultEnd); err != nil {
+		return err
+	}
+	if err := rw.Flush(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (h *handler) respItemLine(item *MetaItem, rw *bufio.ReadWriter) error {
+	line := fmt.Sprintf("VALUE %s %d %d\r\n", item.key, item.flags, item.byteLen)
+	if _, err := rw.Write([]byte(line)); err != nil {
+		return err
+	}
+	return nil
+}
+
