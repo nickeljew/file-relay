@@ -249,21 +249,21 @@ func (h *handler) process(cn *conn, entry *ItemsEntry) error {
 		return e
 	}
 
-	reqline := &ReqLine{}
-	reqline.parseLine(line)
-	Debugf(" - Recv: %T %v\n\n", reqline, reqline)
+	msgline := &MsgLine{}
+	msgline.parseLine(line)
+	Debugf(" - Recv: %T %v\n\n", msgline, msgline)
 
 	var storeCmds = map[string]bool{
 		"set": true,
 		"add": true,
 		"replace": true,
 	}
-	if storeCmds[reqline.Cmd] {
-		if e := h.handleStorage(reqline, cn.rw, entry); e != nil {
+	if storeCmds[msgline.Cmd] {
+		if e := h.handleStorage(msgline, cn.rw, entry); e != nil {
 			return e
 		}
-	} else if reqline.Cmd == "get" {
-		if e := h.handleRetrieval(reqline, cn.rw, entry); e != nil {
+	} else if msgline.Cmd == "get" {
+		if e := h.handleRetrieval(msgline, cn.rw, entry); e != nil {
 			return e
 		}
 	}
@@ -273,14 +273,14 @@ func (h *handler) process(cn *conn, entry *ItemsEntry) error {
 
 
 
-func (h *handler) handleStorage(reqline *ReqLine, rw *bufio.ReadWriter, entry *ItemsEntry) error {
+func (h *handler) handleStorage(msgline *MsgLine, rw *bufio.ReadWriter, entry *ItemsEntry) error {
 	_log := log.WithFields(logrus.Fields{
-		"cmd": reqline.Cmd,
-		"itemKey": reqline.Key,
-		"valueLen": reqline.ValueLen,
+		"cmd": msgline.Cmd,
+		"itemKey": msgline.Key,
+		"valueLen": msgline.ValueLen,
 	})
 
-	exp := reqline.Expiration
+	exp := msgline.Expiration
 	if exp < h.cfg.MinExpiration {
 		exp = h.cfg.MinExpiration
 	}
@@ -295,9 +295,9 @@ func (h *handler) handleStorage(reqline *ReqLine, rw *bufio.ReadWriter, entry *I
 		return nil
 	}
 
-	item := NewMetaItem(reqline.Key, reqline.Flags, exp, reqline.ValueLen)
+	item := NewMetaItem(msgline.Key, msgline.Flags, exp, msgline.ValueLen)
 	var err error
-	switch reqline.Cmd {
+	switch msgline.Cmd {
 	case "set":
 		err = entry.Set(item)
 	case "add":
@@ -315,12 +315,12 @@ func (h *handler) handleStorage(reqline *ReqLine, rw *bufio.ReadWriter, entry *I
 		_log.Error(e.Error())
 	}
 
-	bytesLeft := reqline.ValueLen
+	bytesLeft := msgline.ValueLen
 	for i, s := range item.slots {
 		Debugf(" - Slot[%d]: %d, byte-left: %d", s.capacity, i, bytesLeft)
 
 		s.SetInfoWithItem(item)
-		if n, e := s.ReadAndSet(reqline.Key, rw, bytesLeft); e != nil {
+		if n, e := s.ReadAndSet(msgline.Key, rw, bytesLeft); e != nil {
 			_log.Error(e.Error())
 			break
 		} else {
@@ -378,21 +378,33 @@ func (h *handler) findSlots(slotCap, cnt int, t *MetaItem) error {
 }
 
 
-func (h *handler) handleRetrieval(reqline *ReqLine, rw *bufio.ReadWriter, entry *ItemsEntry) error {
+func (h *handler) handleRetrieval(msgline *MsgLine, rw *bufio.ReadWriter, entry *ItemsEntry) error {
 	//_log := log.WithFields(logrus.Fields{
-	//	"cmd": reqline.Cmd,
-	//	"itemKey": reqline.Key,
+	//	"cmd": msgline.Cmd,
+	//	"itemKey": msgline.Key,
 	//})
 
-	item := entry.Get(reqline.Key)
+	item := entry.Get(msgline.Key)
 	if item == nil {
-		item = NewMetaItem(reqline.Key, 0, 0, 0)
-		if e := h.respItemLine(item, rw); e != nil {
+		item = NewMetaItem(msgline.Key, 0, 0, 0)
+	}
+
+	if e := h.writeRespFirstLine(item, rw); e != nil {
+		return e
+	}
+
+	// Write value block and end with \r\n
+	if item.byteLen > 0 && len(item.slots) > 0 {
+		for _, s := range item.slots {
+			bytes := s.data[:s.used]
+			if _, e := rw.Write(bytes); e != nil {
+				return e
+			}
+		}
+		if _, e := rw.Write([]byte("\r\n")); e != nil {
 			return e
 		}
 	}
-
-	//TODO: get value block and end with \r\n
 
 	if _, err := rw.Write(ResultEnd); err != nil {
 		return err
@@ -403,7 +415,7 @@ func (h *handler) handleRetrieval(reqline *ReqLine, rw *bufio.ReadWriter, entry 
 	return nil
 }
 
-func (h *handler) respItemLine(item *MetaItem, rw *bufio.ReadWriter) error {
+func (h *handler) writeRespFirstLine(item *MetaItem, rw *bufio.ReadWriter) error {
 	line := fmt.Sprintf("VALUE %s %d %d\r\n", item.key, item.flags, item.byteLen)
 	if _, err := rw.Write([]byte(line)); err != nil {
 		return err

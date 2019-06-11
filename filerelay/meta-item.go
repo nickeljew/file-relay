@@ -91,6 +91,9 @@ func (e *ItemsEntry) StopCheck() {
 func (e *ItemsEntry) ScheduledCheck() {
 	if e.checkpoint == nil {
 		e.checkpoint = e.list.Front()
+		if e.checkpoint == nil {
+			return
+		}
 	}
 
 	e.Lock()

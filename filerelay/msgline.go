@@ -25,13 +25,13 @@ var (
 )
 
 
-// Error for paring ReqLine
-type ReqLineError struct {
+// Error for paring MsgLine
+type MsgLineError struct {
 	field string
 	info string
 }
 
-func (e *ReqLineError) Error() string {
+func (e *MsgLineError) Error() string {
 	arr := []string{"Parsing fail at field '", e.field, "'",}
 	if e.info != "" {
 		arr = append(arr, ": ", e.info)
@@ -41,10 +41,10 @@ func (e *ReqLineError) Error() string {
 
 
 
-type ReqLine struct {
+type MsgLine struct {
 	Cmd string
 
-	// Key is the ReqLine's key (250 bytes maximum).
+	// Key is the MsgLine's key (250 bytes maximum).
 	Key string
 
 	// Flags are server-opaque flags whose semantics are entirely
@@ -53,91 +53,95 @@ type ReqLine struct {
 
 	// Expiration is the cache expiration time, in seconds: either a relative
 	// time from now (up to 1 month), or an absolute Unix epoch time.
-	// Zero means the ReqLine has no expiration time.
+	// Zero means the MsgLine has no expiration time.
 	Expiration int64//time.Duration
 
 	ValueLen int
 
 	// Compare and swap ID.
-	casid uint64
+	CasId uint64
 }
 
-func (rl *ReqLine) String() string {
+func (ml *MsgLine) String() string {
 	arr := []string{
 		"&{ ",
-		"Cmd:", rl.Cmd, ", ",
-		"Key:", rl.Key, ", ",
-		"Flags:", strconv.FormatUint(uint64(rl.Flags), 10), ", ",
-		"Expiration:", strconv.FormatInt(rl.Expiration, 10), ", ",
-		"ValueLen:", strconv.FormatInt(int64(rl.ValueLen), 10), ", ",
+		"Cmd:", ml.Cmd, ", ",
+		"Key:", ml.Key, ", ",
+		"Flags:", strconv.FormatUint(uint64(ml.Flags), 10), ", ",
+		"Expiration:", strconv.FormatInt(ml.Expiration, 10), ", ",
+		"ValueLen:", strconv.FormatInt(int64(ml.ValueLen), 10), ", ",
 		"}",
 	}
 	return strings.Join(arr, "")
 }
 
 //
-func (rl *ReqLine) parseLine(line []byte) {
+func (ml *MsgLine) parseLine(line []byte) {
 	parts := strings.Split(strings.Trim(string(line), " \r\n"), " ")
 
-	if rl.Cmd = parts[0]; rl.Cmd == "" {
+	if ml.Cmd = parts[0]; ml.Cmd == "" {
 		return
 	}
 	
 	var err error
-	if parts, err = rl.handleStoreCmdParts(parts[1:]); err != nil {
+	if parts, err = ml.handleStoreCmdParts(parts[1:]); err != nil {
 		return
 	}
-	if rl.Cmd == "cas" && len(parts) > 0 {
-		if parts, err = rl.handleCasCmdParts(parts[1:]); err != nil {
+	if ml.Cmd == "cas" && len(parts) > 0 {
+		if parts, err = ml.handleCasCmdParts(parts[1:]); err != nil {
 			return
 		}
 	}
 
 }
 
-func (rl *ReqLine) handleStoreCmdParts(parts []string) ([]string, error) {
+func (ml *MsgLine) handleStoreCmdParts(parts []string) ([]string, error) {
 	i := 0
-	if rl.Key = parts[i]; !ValidKey(rl.Key) {
-		return nil, &ReqLineError{"key", ""}
+	if ml.Key = parts[i]; !ValidKey(ml.Key) {
+		return nil, &MsgLineError{"key", ""}
 	}
 	i++
 
+	if len(parts[i:]) == 0 {
+		return parts[i:], nil
+	}
+
 	if d, e := strconv.ParseInt(parts[i], 10, 32); e == nil && d >= 0 {
-		rl.Flags = uint32(d)
+		ml.Flags = uint32(d)
 	} else if e != nil {
 		return nil, e
 	} else {
-		return nil, &ReqLineError{"flags", "negative number"}
+		return nil, &MsgLineError{"flags", "negative number"}
 	}
 	i++
 
 	if d, e := strconv.ParseInt(parts[i], 10, 32); e == nil {
-		rl.Expiration = d
+		ml.Expiration = d
 	} else {
 		return nil, e
 	}
 	i++
 
 	if d, e := strconv.ParseInt(parts[i], 10, 64); e == nil && d >= 0 {
-		rl.ValueLen = int(d)
+		ml.ValueLen = int(d)
 	} else if e != nil {
 		return nil, e
 	} else {
-		return nil, &ReqLineError{"bytes len", "negative number"}
+		return nil, &MsgLineError{"bytes len", "negative number"}
 	}
 	i++
 
 	return parts[i:], nil
 }
 
-func (rl *ReqLine) handleCasCmdParts(parts []string) ([]string, error) {
+func (ml *MsgLine) handleCasCmdParts(parts []string) ([]string, error) {
 	i := 0
 	if d, e := strconv.ParseInt(parts[i], 10, 64); e == nil && d >= 0 {
-		rl.casid = uint64(d)
+		ml.CasId = uint64(d)
 	} else if e != nil {
 		return nil, e
 	} else {
-		return nil, &ReqLineError{"cas unique", "negative number"}
+		return nil, &MsgLineError{"cas unique", "negative number"}
 	}
 	i++
 	return parts[i:], nil
