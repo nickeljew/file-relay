@@ -96,12 +96,7 @@ func doConcurrentSet(cnt int) {
 
 func doSetInIndex(idx int, fin chan int) {
 	fmt.Println("Doing at index: ", idx)
-	client, err := setupClient()
-	if err != nil {
-		fmt.Println(err.Error())
-		return
-	}
-	if err := trySet(client, ""); err != nil {
+	if err := trySet(""); err != nil {
 		fmt.Printf("Error in %d: %s\n", idx, err.Error())
 	} else {
 		fmt.Printf("Finish %d\n", idx)
@@ -110,35 +105,28 @@ func doSetInIndex(idx int, fin chan int) {
 }
 
 func doSetNGet(key string) {
-	client, err := setupClient()
-	if err != nil {
-		fmt.Println(err.Error())
-		return
-	}
-
 	fmt.Println("# Doing set with key: ", key)
-	if e := trySet(client, key); e != nil {
+	if e := trySet(key); e != nil {
 		fmt.Printf("Error: %s\n", e.Error())
 	} else {
 		fmt.Println("Finish")
 	}
-	client.nc.Close()
-
-	client, err = setupClient()
-	if err != nil {
-		fmt.Println(err.Error())
-		return
-	}
 
 	fmt.Println("# Doing get with key: ", key)
-	if e := tryGet(client, key); e != nil {
+	if e := tryGet(key); e != nil {
 		fmt.Printf("Error: %s\n", e.Error())
 	}
-	client.nc.Close()
 }
 
 //
-func trySet(client *Client, key string) error {
+func trySet(key string) error {
+	client, err := setupClient()
+	if err != nil {
+		fmt.Println(err.Error())
+		return nil
+	}
+	defer client.nc.Close()
+
 	reqValue, err := ioutil.ReadFile("./test.txt")
 	key = strings.Trim(key, " \f\n\r\t\v")
 	if key == "" {
@@ -197,7 +185,14 @@ func trySet(client *Client, key string) error {
 
 
 //
-func tryGet(client *Client, key string) error {
+func tryGet(key string) error {
+	client, err := setupClient()
+	if err != nil {
+		fmt.Println(err.Error())
+		return nil
+	}
+	defer client.nc.Close()
+
 	toSend := fmt.Sprintf("get %s\r\n", key)
 	fmt.Printf("Sending:\n>%s", toSend)
 	if _, err := client.rw.Write([]byte(toSend)); err != nil {
