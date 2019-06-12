@@ -122,11 +122,19 @@ func doSetNGet(key string) {
 	} else {
 		fmt.Println("Finish")
 	}
+	client.nc.Close()
+
+	client, err = setupClient()
+	if err != nil {
+		fmt.Println(err.Error())
+		return
+	}
 
 	fmt.Println("# Doing get with key: ", key)
 	if e := tryGet(client, key); e != nil {
 		fmt.Printf("Error: %s\n", e.Error())
 	}
+	client.nc.Close()
 }
 
 //
