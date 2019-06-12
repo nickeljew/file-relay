@@ -1,12 +1,12 @@
 package filerelay
 
 import (
+	"container/list"
 	"errors"
 	"sync"
 	"time"
 
 	. "github.com/nickeljew/file-relay/debug"
-	"github.com/nickeljew/file-relay/list"
 )
 
 const (
@@ -16,7 +16,7 @@ const (
 
 type Stub struct {
 	slotCap int
-	slots *list.LinkedList
+	slots *list.List
 	checkTime int64
 	checkIntv int
 	sync.Mutex
@@ -33,49 +33,49 @@ func NewStub(slotCap, slotCount, checkIntv int) *Stub {
 		checkIntv: checkIntv,
 	}
 	for i := 0; i < slotCount; i++ {
-		stub.slots.Push( NewSlot(slotCap) )
+		stub.slots.PushBack( NewSlot(slotCap) )
 	}
 	return &stub
 }
 
 func (s *Stub) Capacity() int {
-	return s.slotCap * s.slots.Length()
+	return s.slotCap * s.slots.Len()
 }
 
 func (s *Stub) FindAvailableSlot() *Slot {
 	s.Lock()
 	defer s.Unlock()
 	
-	entry := s.slots.GetFirst()
-	slot := entry.Value().(*Slot)
+	elem := s.slots.Front()
+	slot := elem.Value.(*Slot)
 	if slot.CheckClear() {
-		s.slots.MoveBack(entry)
+		s.slots.MoveToBack(elem)
 		return slot
 	}
 
 	if pass := int(time.Now().Unix() - s.checkTime); pass >= s.checkIntv {
-		entry = s.tryClearFromLast(s.slots.Length() - 1)
-		if entry != nil {
-			s.slots.MoveBack(entry)
-			return entry.Value().(*Slot)
+		elem = s.tryClearFromLast(s.slots.Len() - 1)
+		if elem != nil {
+			s.slots.MoveToBack(elem)
+			return elem.Value.(*Slot)
 		}
 	}
 
 	return nil
 }
 
-func (s *Stub) tryClearFromLast(n int) *list.Entry {
-	var entry, rtv *list.Entry
+func (s *Stub) tryClearFromLast(n int) (el *list.Element) {
+	var elem *list.Element
 	var slot *Slot
 	for ; n > 0; n-- {
-		entry = s.slots.GetLast()
-		slot = entry.Value().(*Slot)
+		elem = s.slots.Back()
+		slot = elem.Value.(*Slot)
 		if slot.CheckClear() {
-			s.slots.MoveFront(entry)
-			rtv = entry
+			s.slots.MoveToFront(elem)
+			el = elem
 		}
 	}
-	return rtv
+	return
 }
 
 
@@ -86,7 +86,7 @@ type StubGroup struct {
 	slotCount int
 	totalCap int
 
-	stubs *list.LinkedList
+	stubs *list.List
 	sync.Mutex
 }
 
@@ -99,13 +99,13 @@ func NewStubGroup(slotCap, stubCount, slotCount, checkIntv int) *StubGroup {
 		stubs: list.New(),
 	}
 	for i := 0; i < stubCount; i++ {
-		group.stubs.Push( NewStub(slotCap, slotCount, checkIntv) )
+		group.stubs.PushBack( NewStub(slotCap, slotCount, checkIntv) )
 	}
 	return &group
 }
 
 func (g *StubGroup) SlotSum() int {
-	return g.slotCount * g.stubs.Length()
+	return g.slotCount * g.stubs.Len()
 }
 
 func (g *StubGroup) FindAvailableSlots(need int) (s []*Slot, e error) {
@@ -115,7 +115,7 @@ func (g *StubGroup) FindAvailableSlots(need int) (s []*Slot, e error) {
 
 	s = make([]*Slot, 0, need)
 	result := make(StubCh)
-	conc, did, cnt, left := stubsCheckConc, 0, need, g.stubs.Length()
+	conc, did, cnt, left := stubsCheckConc, 0, need, g.stubs.Len()
 	if conc > need {
 		conc = need
 	}
@@ -170,8 +170,8 @@ func (g *StubGroup) getStubForCheck(r StubCh) {
 	g.Lock()
 	defer g.Unlock()
 	
-	entry := g.stubs.GetFirst()
-	stub := entry.Value().(*Stub)
-	g.stubs.MoveBack(entry)
+	elem := g.stubs.Front()
+	stub := elem.Value.(*Stub)
+	g.stubs.MoveToBack(elem)
 	r <- stub
 }
