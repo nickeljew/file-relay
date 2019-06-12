@@ -40,7 +40,7 @@ func (s *Slot) Occupied() bool {
 	return s.used > 0 && s.duration > 0
 }
 
-func (s *Slot) Available() bool {
+func (s *Slot) Vacant() bool {
 	if s.used == 0 || s.duration == 0 {
 		return true
 	}
@@ -51,7 +51,7 @@ func (s *Slot) Available() bool {
 }
 
 func (s *Slot) CheckClear() bool {
-	ok := s.Available()
+	ok := s.Vacant()
 	if ok && s.duration > 0 {
 		s.Clear()
 	}

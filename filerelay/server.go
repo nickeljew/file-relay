@@ -395,14 +395,23 @@ func (h *handler) handleRetrieval(msgline *MsgLine, rw *bufio.ReadWriter, entry 
 
 	// Write value block and end with \r\n
 	if item.byteLen > 0 && len(item.slots) > 0 {
+		ok := true
 		for _, s := range item.slots {
-			bytes := s.data[:s.used]
-			if _, e := rw.Write(bytes); e != nil {
-				return e
+			if s.Vacant() {
+				ok = false
+				break
 			}
 		}
-		if _, e := rw.Write([]byte("\r\n")); e != nil {
-			return e
+		if ok {
+			for _, s := range item.slots {
+				bytes := s.data[:s.used]
+				if _, e := rw.Write(bytes); e != nil {
+					return e
+				}
+			}
+			if _, e := rw.Write([]byte("\r\n")); e != nil {
+				return e
+			}
 		}
 	}
 

@@ -89,20 +89,22 @@ func (e *ItemsEntry) StopCheck() {
 }
 
 func (e *ItemsEntry) ScheduledCheck() {
+	listLen := e.list.Len()
+	if listLen == 0 {
+		return
+	}
+
 	if e.checkpoint == nil {
 		e.checkpoint = e.list.Front()
-		if e.checkpoint == nil {
-			return
-		}
 	}
 
 	e.Lock()
 	defer e.Unlock()
 
 	steps := e.checkSteps
-	if l := e.list.Len(); l < steps {
-		Debug("ItemsEntry len: ", l)
-		steps = l
+	if listLen < steps {
+		Debug("ItemsEntry len: ", listLen)
+		steps = listLen
 	}
 
 	for {
@@ -159,11 +161,29 @@ func (e *ItemsEntry) replace(t *MetaItem) *skiplist.Element {
 	return elem
 }
 
+func (e *ItemsEntry) movePoint(key string) {
+	if e.checkpoint == nil {
+		return
+	}
+
+	k := e.checkpoint.Key().(string)
+	Debug("Current checkpoint key: ", k)
+	if k == key {
+		e.checkpoint = e.checkpoint.Next()
+		if e.checkpoint == nil {
+			Debug("After removed, checkpoint is nil")
+		} else {
+			Debug("After removed, checkpoint key: ", e.checkpoint.Key().(string))
+		}
+	}
+}
+
 
 func (e *ItemsEntry) Get(key string) *MetaItem {
 	t := e.get(key)
 	if t != nil && t.Expired() {
 		_ = e.remove(key,true)
+		e.movePoint(key)
 		return nil
 	}
 	return t
@@ -179,16 +199,7 @@ func (e *ItemsEntry) Remove(key string) *MetaItem {
 		return nil
 	}
 	t := elem.Value.(*MetaItem)
-	if e.checkpoint == nil {
-		return t
-	}
-
-	k := e.checkpoint.Key().(string)
-	Debug("Current checkpoint key: ", k)
-	if k == t.key {
-		e.checkpoint = e.checkpoint.Next()
-		Debug("After removed, checkpoint key: ", e.checkpoint.Key().(string))
-	}
+	e.movePoint(key)
 	return t
 }
 

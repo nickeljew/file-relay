@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/nickeljew/file-relay/filerelay"
 )
@@ -44,10 +45,10 @@ var (
 
 //
 func main() {
-	fmt.Println("File-Relay client")
+	fmt.Println("File-Relay client *", time.Now())
 
 	//doConcurrentSet(1)
-	doSetNGet("test-abc-set-and-get")
+	doSetNGet("test-abc-set-and-get", false)
 	
 	os.Exit(0)
 }
@@ -104,12 +105,14 @@ func doSetInIndex(idx int, fin chan int) {
 	fin <- idx
 }
 
-func doSetNGet(key string) {
-	fmt.Println("# Doing set with key: ", key)
-	if e := trySet(key); e != nil {
-		fmt.Printf("Error: %s\n", e.Error())
-	} else {
-		fmt.Println("Finish")
+func doSetNGet(key string, onlyGet bool) {
+	if !onlyGet {
+		fmt.Println("# Doing set with key: ", key)
+		if e := trySet(key); e != nil {
+			fmt.Printf("Error: %s\n", e.Error())
+		} else {
+			fmt.Println("Finish")
+		}
 	}
 
 	fmt.Println("# Doing get with key: ", key)
@@ -138,7 +141,7 @@ func trySet(key string) error {
 		Key: key,
 		ValueLen: len(reqValue),
 		Flags: 1,
-		Expiration: 1800,
+		Expiration: 120,
 	}
 
 	toSend := fmt.Sprintf("%s %s %d %d %d\r\n",
