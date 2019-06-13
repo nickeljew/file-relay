@@ -34,6 +34,7 @@ const (
 
 
 type MemConfig struct {
+	LRUSize int //mac count of items in LRU list
 	SkipListCheckStep int
 	//SkipListCheckIntv int //in seconds
 
@@ -49,6 +50,7 @@ type MemConfig struct {
 
 func NewMemConfig() MemConfig {
 	return MemConfig{
+		LRUSize: 100000,
 		SkipListCheckStep: 100,
 		//SkipListCheckIntv: 60,
 
@@ -98,7 +100,7 @@ func NewServer(max int, c MemConfig) *Server {
 		hdrNotif: make(chan int),
 		quit: make(chan byte),
 		memCfg: c,
-		entry: NewItemsEntry(c.SkipListCheckStep),
+		entry: NewItemsEntry(c.LRUSize, c.SkipListCheckStep),
 		groups: make( map[int]*StubGroup ),
 	}
 }
