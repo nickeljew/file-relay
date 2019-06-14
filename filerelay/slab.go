@@ -3,6 +3,7 @@ package filerelay
 import (
 	"container/list"
 	"errors"
+	"math"
 	"sync"
 	"time"
 
@@ -18,7 +19,7 @@ type Slab struct {
 	slotCap int
 	slots *list.List
 	checkTime int64
-	checkIntv int
+	checkIntv int //in seconds
 	sync.Mutex
 }
 
@@ -54,11 +55,17 @@ func (s *Slab) FindAvailableSlot() *Slot {
 	}
 
 	if pass := int(time.Now().Unix() - s.checkTime); pass >= s.checkIntv {
-		elem = s.tryClearFromLast(s.slots.Len() - 1)
+		n := int(math.Floor(float64(s.slots.Len() / 10)))
+		if n > 5 {
+			n = 5
+		}
+
+		elem = s.tryClearFromLast(n)
 		if elem != nil {
 			s.slots.MoveToBack(elem)
 			return elem.Value.(*Slot)
 		}
+		s.checkTime = time.Now().Unix()
 	}
 
 	return nil

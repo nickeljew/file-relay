@@ -5,6 +5,9 @@ import (
 	"os"
 
 	"github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v3"
+
+	. "github.com/nickeljew/file-relay/debug"
 )
 
 
@@ -30,18 +33,16 @@ func init() {
 }
 
 
-
 //
-// func init() {
-// 	//
-// }
-
-func InitConfig() (*MemConfig, error) {
-	//TODO: read config from yaml file
+func ParseConfig(rawCfg string) (*MemConfig, error) {
 	cfg := NewMemConfig()
-	cfg.Port = PORT
-	cfg.NetworkType = NetType
-	cfg.MaxRoutines = 2
+	//cfg.Port = PORT
+	//cfg.NetworkType = NetType
+	//cfg.MaxRoutines = 2
+
+	if e := yaml.Unmarshal([]byte(rawCfg), cfg); e != nil {
+		return nil, e
+	}
 	return cfg, nil
 }
 
@@ -56,11 +57,17 @@ func InitClientConfig(host string) (*Config, error) {
 
 
 //
-func Start() int {
-	cfg, _ := InitConfig()
-	lis, err := net.Listen(cfg.NetworkType, cfg.Addr())
+func Start(rawCfg string) int {
+	cfg, err := ParseConfig(rawCfg)
 	if err != nil {
-		log.Error("Error listening: ", err.Error())
+		log.Error("Error parsing config: ", err.Error())
+		return 1
+	}
+	Debugf("## Init with config: %v", cfg)
+
+	lis, err2 := net.Listen(cfg.NetworkType, cfg.Addr())
+	if err2 != nil {
+		log.Error("Error listening: ", err2.Error())
 		return 1
 	}
 	log.Info("Server is listening at: ", cfg.Addr())

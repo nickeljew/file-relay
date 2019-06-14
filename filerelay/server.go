@@ -30,7 +30,7 @@ const (
 
 const (
 	SlotMinExpriration = 60
-	SlabCheckInterval = 5
+	SlabCheckInterval = 10
 )
 
 
@@ -54,7 +54,7 @@ type MemConfig struct {
 func NewMemConfig() *MemConfig {
 	return &MemConfig{
 		LRUSize: 100000,
-		SkipListCheckStep: 100,
+		SkipListCheckStep: 20,
 		//SkipListCheckIntv: 60,
 
 		MinExpiration: SlotMinExpriration,
