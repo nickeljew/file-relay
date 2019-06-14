@@ -21,6 +21,7 @@ const (
 	sz256B
 	szKB
 	sz4KB
+
 	sz16KB
 	sz64KB
 	sz256KB
@@ -29,39 +30,41 @@ const (
 
 const (
 	SlotMinExpriration = 60
-	StubCheckInterval = 5
+	SlabCheckInterval = 5
 )
 
 
 type MemConfig struct {
-	LRUSize int //mac count of items in LRU list
-	SkipListCheckStep int
-	//SkipListCheckIntv int //in seconds
+	Config `yaml:",inline"`
 
-	MinExpiration int64 //in seconds
-	StubCheckIntv int //in seconds
+	LRUSize int `yaml:"lru-size"` //mac count of items in LRU list
+	SkipListCheckStep int `yaml:"skiplist-check-step"`
+	//SkipListCheckIntv `yaml:"skiplist-check-interval"` int //in seconds
 
-	SlotCapMin int //in bytes
-	SlotCapMax int //in bytes
+	MinExpiration int64 `yaml:"min-expiration"` //in seconds
+	SlabCheckIntv int `yaml:"slab-check-interval"` //in seconds
 
-	SlotsInStub int
-	SlubsInGroup int
+	SlotCapMin int `yaml:"slot-capacity-min"` //in bytes
+	SlotCapMax int  `yaml:"slot-capacity-max"` //in bytes
+
+	SlotsInSlab int `yaml:"slots-in-slab"`
+	SlabsInGroup int `yaml:"slabs-in-group"`
 }
 
-func NewMemConfig() MemConfig {
-	return MemConfig{
+func NewMemConfig() *MemConfig {
+	return &MemConfig{
 		LRUSize: 100000,
 		SkipListCheckStep: 100,
 		//SkipListCheckIntv: 60,
 
 		MinExpiration: SlotMinExpriration,
-		StubCheckIntv: StubCheckInterval,
+		SlabCheckIntv: SlabCheckInterval,
 	
-		SlotCapMin: ValFrom(sz64B, szKB).(int),
-		SlotCapMax: ValFrom(szKB, szMB).(int),
+		SlotCapMin: ValFrom(sz16B, sz64B).(int),
+		SlotCapMax: ValFrom(szKB, sz4KB).(int),
 	
-		SlotsInStub: ValFrom(10, 100).(int),
-		SlubsInGroup: ValFrom(10, 100).(int),
+		SlotsInSlab: ValFrom(10, 100).(int),
+		SlabsInGroup: ValFrom(10, 100).(int),
 	}
 }
 
@@ -76,7 +79,7 @@ type Server struct {
 	memCfg MemConfig
 
 	entry *ItemsEntry
-	groups map[int]*StubGroup
+	groups map[int]*SlabGroup
 }
 
 //
@@ -93,20 +96,20 @@ func makeConn(nc net.Conn) *conn {
 }
 
 
-func NewServer(max int, c MemConfig) *Server {
+func NewServer(c *MemConfig) *Server {
 	return &Server{
-		max: max,
-		handlers: make([]*handler, 0, max),
+		max: c.MaxRoutines,
+		handlers: make([]*handler, 0, c.MaxRoutines),
 		hdrNotif: make(chan int),
 		quit: make(chan byte),
-		memCfg: c,
+		memCfg: *c,
 		entry: NewItemsEntry(c.LRUSize, c.SkipListCheckStep),
-		groups: make( map[int]*StubGroup ),
+		groups: make( map[int]*SlabGroup ),
 	}
 }
 
 func (s *Server) Start() {
-	s.initStubs()
+	s.initSlabs()
 	s.entry.StartCheck()
 	var i int
 	for {
@@ -136,15 +139,15 @@ func (s *Server) Start() {
 func (s *Server) Stop() {
 	s.entry.StopCheck()
 	s.quit <- 0
-	s.clearStubs()
+	s.clearSlabs()
 }
 
 //
-func (s *Server) initStubs() {
+func (s *Server) initSlabs() {
 	c := s.memCfg.SlotCapMin
 	for {
-		s.groups[c] = NewStubGroup(c,
-			s.memCfg.SlubsInGroup, s.memCfg.SlotsInStub, s.memCfg.StubCheckIntv)
+		s.groups[c] = NewSlabGroup(c,
+			s.memCfg.SlabsInGroup, s.memCfg.SlotsInSlab, s.memCfg.SlabCheckIntv)
 
 		Debugf("Check group: %d; %d, %v", len(s.groups), c, s.groups[c])
 
@@ -155,7 +158,7 @@ func (s *Server) initStubs() {
 	}
 }
 
-func (s *Server) clearStubs() {
+func (s *Server) clearSlabs() {
 	c := s.memCfg.SlotCapMin
 	for {
 		s.groups[c] = nil
@@ -220,10 +223,10 @@ type handler struct {
 	running bool
 
 	cfg *MemConfig
-	groups map[int]*StubGroup
+	groups map[int]*SlabGroup
 }
 
-func newHandler(idx int, notif chan int, c *MemConfig, groups map[int]*StubGroup) (*handler) {
+func newHandler(idx int, notif chan int, c *MemConfig, groups map[int]*SlabGroup) *handler {
 	return &handler{
 		index: idx,
 		quit: make(chan byte),
@@ -264,7 +267,7 @@ func (h *handler) process(cn *conn, entry *ItemsEntry) error {
 		if e := h.handleStorage(msgline, cn.rw, entry); e != nil {
 			return e
 		}
-	} else if msgline.Cmd == "get" {
+	} else if msgline.Cmd == "get" || msgline.Cmd == "gets" {
 		if e := h.handleRetrieval(msgline, cn.rw, entry); e != nil {
 			return e
 		}
@@ -341,7 +344,7 @@ func (h *handler) allocSlots(t *MetaItem) error {
 	byteLen := t.byteLen
 	c := h.cfg.SlotCapMax
 	for {
-		//Debugf("Check stub-groups for capacity: %d; Left-bytes: %d", c, byteLen)
+		//Debugf("Check slab-groups for capacity: %d; Left-bytes: %d", c, byteLen)
 
 		if byteLen > c {
 			rest := byteLen % c
@@ -354,12 +357,17 @@ func (h *handler) allocSlots(t *MetaItem) error {
 			if e := h.findSlots(c, cnt, t); e != nil {
 				return e
 			}
+		} else if c == h.cfg.SlotCapMin {
+			byteLen = 0
+			if e := h.findSlots(c, 1, t); e != nil {
+				return e
+			}
 		}
 
 		if byteLen <= 0 {
 			break
 		}
-		c = c >> 2
+		c = c >> szShift
 	}
 	return nil
 }

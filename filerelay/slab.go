@@ -10,11 +10,11 @@ import (
 )
 
 const (
-	stubsCheckConc = 3
+	slabsCheckConc = 3
 )
 
 
-type Stub struct {
+type Slab struct {
 	slotCap int
 	slots *list.List
 	checkTime int64
@@ -22,27 +22,27 @@ type Stub struct {
 	sync.Mutex
 }
 
-func NewStub(slotCap, slotCount, checkIntv int) *Stub {
-	if checkIntv < StubCheckInterval {
-		checkIntv = StubCheckInterval
+func NewSlab(slotCap, slotCount, checkIntv int) *Slab {
+	if checkIntv < SlabCheckInterval {
+		checkIntv = SlabCheckInterval
 	}
-	stub := Stub{
+	slab := Slab{
 		slotCap: slotCap,
 		slots: list.New(),
 		checkTime: time.Now().Unix(),
 		checkIntv: checkIntv,
 	}
 	for i := 0; i < slotCount; i++ {
-		stub.slots.PushBack( NewSlot(slotCap) )
+		slab.slots.PushBack( NewSlot(slotCap) )
 	}
-	return &stub
+	return &slab
 }
 
-func (s *Stub) Capacity() int {
+func (s *Slab) Capacity() int {
 	return s.slotCap * s.slots.Len()
 }
 
-func (s *Stub) FindAvailableSlot() *Slot {
+func (s *Slab) FindAvailableSlot() *Slot {
 	s.Lock()
 	defer s.Unlock()
 	
@@ -64,7 +64,7 @@ func (s *Stub) FindAvailableSlot() *Slot {
 	return nil
 }
 
-func (s *Stub) tryClearFromLast(n int) (el *list.Element) {
+func (s *Slab) tryClearFromLast(n int) (el *list.Element) {
 	var elem *list.Element
 	var slot *Slot
 	for ; n > 0; n-- {
@@ -81,41 +81,41 @@ func (s *Stub) tryClearFromLast(n int) (el *list.Element) {
 
 
 
-type StubGroup struct {
+type SlabGroup struct {
 	slotCap int
 	slotCount int
 	totalCap int
 
-	stubs *list.List
+	slabs *list.List
 	sync.Mutex
 }
 
-type StubCh chan *Stub
+type SlabCh chan *Slab
 
-func NewStubGroup(slotCap, stubCount, slotCount, checkIntv int) *StubGroup {
-	group := StubGroup{
+func NewSlabGroup(slotCap, slabCount, slotCount, checkIntv int) *SlabGroup {
+	group := SlabGroup{
 		slotCap: slotCap,
 		slotCount: slotCount,
-		stubs: list.New(),
+		slabs: list.New(),
 	}
-	for i := 0; i < stubCount; i++ {
-		group.stubs.PushBack( NewStub(slotCap, slotCount, checkIntv) )
+	for i := 0; i < slabCount; i++ {
+		group.slabs.PushBack( NewSlab(slotCap, slotCount, checkIntv) )
 	}
 	return &group
 }
 
-func (g *StubGroup) SlotSum() int {
-	return g.slotCount * g.stubs.Len()
+func (g *SlabGroup) SlotSum() int {
+	return g.slotCount * g.slabs.Len()
 }
 
-func (g *StubGroup) FindAvailableSlots(need int) (s []*Slot, e error) {
+func (g *SlabGroup) FindAvailableSlots(need int) (s []*Slot, e error) {
 	if need > g.SlotSum() {
 		return nil, errors.New("too many slots to request")
 	}
 
 	s = make([]*Slot, 0, need)
-	result := make(StubCh)
-	conc, did, cnt, left := stubsCheckConc, 0, need, g.stubs.Len()
+	result := make(SlabCh)
+	conc, did, cnt, left := slabsCheckConc, 0, need, g.slabs.Len()
 	if conc > need {
 		conc = need
 	}
@@ -129,12 +129,12 @@ func (g *StubGroup) FindAvailableSlots(need int) (s []*Slot, e error) {
 		}
 
 		select {
-		case stub := <- result:
+		case slab := <- result:
 			conc = 1
-			if stub == nil {
+			if slab == nil {
 				continue
 			}
-			slot := stub.FindAvailableSlot()
+			slot := slab.FindAvailableSlot()
 			if slot != nil {
 				s = append(s, slot)
 			}
@@ -154,24 +154,24 @@ func (g *StubGroup) FindAvailableSlots(need int) (s []*Slot, e error) {
 	return
 }
 
-func (g *StubGroup) doCheck(conc, total int, r StubCh) (did, left int) {
+func (g *SlabGroup) doCheck(conc, total int, r SlabCh) (did, left int) {
 	left = total
 	for {
 		if did >= conc || left <= 0 {
 			return
 		}
-		go g.getStubForCheck(r)
+		go g.getSlabForCheck(r)
 		did++
 		left--
 	}
 }
 
-func (g *StubGroup) getStubForCheck(r StubCh) {
+func (g *SlabGroup) getSlabForCheck(r SlabCh) {
 	g.Lock()
 	defer g.Unlock()
 	
-	elem := g.stubs.Front()
-	stub := elem.Value.(*Stub)
-	g.stubs.MoveToBack(elem)
-	r <- stub
+	elem := g.slabs.Front()
+	slab := elem.Value.(*Slab)
+	g.slabs.MoveToBack(elem)
+	r <- slab
 }

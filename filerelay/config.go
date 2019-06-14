@@ -20,16 +20,16 @@ func init() {
 
 
 type Config struct {
-	host        string
-	port        string
-	networkType string
+	Host        string `yaml:"host,omitempty"`
+	Port        string `yaml:"port"`
+	NetworkType string `yaml:"network-type"`
 
-	maxRoutines int
+	MaxRoutines int `yaml:"max-routines"`
 }
 
 
 func (c *Config) Addr() string {
-	return c.host + ":" + c.port
+	return c.Host + ":" + c.Port
 }
 
 

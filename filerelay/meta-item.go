@@ -47,6 +47,7 @@ func (t *MetaItem) ClearSlots() {
 func (t *MetaItem) Expired() bool {
 	now := time.Now()
 	diff := now.Sub(t.setAt)
+	Debugf(" - check item expiration -> setAt: %v | now: %v | diff: %v", t.setAt, now, diff)
 	return diff > t.duration
 }
 

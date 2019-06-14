@@ -36,22 +36,21 @@ func init() {
 // 	//
 // }
 
-func InitConfig() (*Config, error) {
+func InitConfig() (*MemConfig, error) {
 	//TODO: read config from yaml file
-	return &Config{
-		port:        PORT,
-		networkType: NetType,
-
-		maxRoutines: 2,
-	}, nil
+	cfg := NewMemConfig()
+	cfg.Port = PORT
+	cfg.NetworkType = NetType
+	cfg.MaxRoutines = 2
+	return cfg, nil
 }
 
 func InitClientConfig(host string) (*Config, error) {
 	//TODO: read config from yaml file
 	return &Config{
-		host: host,
-		port: PORT,
-		networkType: NetType,
+		Host: host,
+		Port: PORT,
+		NetworkType: NetType,
 	}, nil
 }
 
@@ -59,7 +58,7 @@ func InitClientConfig(host string) (*Config, error) {
 //
 func Start() int {
 	cfg, _ := InitConfig()
-	lis, err := net.Listen(cfg.networkType, cfg.Addr())
+	lis, err := net.Listen(cfg.NetworkType, cfg.Addr())
 	if err != nil {
 		log.Error("Error listening: ", err.Error())
 		return 1
@@ -67,8 +66,7 @@ func Start() int {
 	log.Info("Server is listening at: ", cfg.Addr())
 	defer lis.Close()
 
-	memCfg := NewMemConfig()
-	server := NewServer(cfg.maxRoutines, memCfg)
+	server := NewServer(cfg)
 	
 	go server.Start()
 	defer server.Stop()
