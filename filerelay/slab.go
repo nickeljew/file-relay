@@ -56,7 +56,9 @@ func (s *Slab) FindAvailableSlot() *Slot {
 
 	if pass := int(time.Now().Unix() - s.checkTime); pass >= s.checkIntv {
 		n := int(math.Floor(float64(s.slots.Len() / 10)))
-		if n > 5 {
+		if n <= 0 {
+			n = 1
+		} else if n > 5 {
 			n = 5
 		}
 
