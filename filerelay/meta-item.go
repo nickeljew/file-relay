@@ -282,11 +282,11 @@ func (e *ItemsEntry) movePoint(key string) {
 
 
 func (e *ItemsEntry) Get(key string) *MetaItem {
-	e.Lock()
-	defer e.Unlock()
-
 	t := e.lru.Get(key)
 	if t != nil && t.Expired() {
+		e.Lock()
+		defer e.Unlock()
+
 		_ = e.lru.Remove(key)
 		e.movePoint(key)
 		return nil

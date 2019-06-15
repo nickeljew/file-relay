@@ -14,7 +14,8 @@ import (
 var (
 	logger = logrus.New()
 	log = logger.WithFields(logrus.Fields{
-		"name": "filerelay",
+		"name": "file-relay",
+		"pkg": "filerelay",
 	})
 )
 
