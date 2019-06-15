@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"runtime"
 	"runtime/pprof"
@@ -10,6 +11,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/nickeljew/file-relay/filerelay"
+	. "github.com/nickeljew/file-relay/debug"
 )
 
 
@@ -45,18 +47,27 @@ var (
 type Profile struct {
 	cpu string
 	mem string
+	cfg string
 }
 
 func getProfile() *Profile {
 	var cpuprof = flag.String("cpuprofile", "", "write cpu profile to `file`")
 	var memprof = flag.String("memprofile", "", "write memory profile to `file`")
+	var cfg = flag.String("cfgfile", "", "yaml file to read configuration")
 
 	flag.Parse()
 
-	return &Profile{
+	p := &Profile{
 		cpu: *cpuprof,
 		mem: *memprof,
+		cfg: *cfg,
 	}
+
+	if p.cfg == "" {
+		p.cfg = "filerelay.yaml"
+	}
+
+	return p
 }
 
 
@@ -90,7 +101,18 @@ func main() {
 		}
 	}
 
-	code := filerelay.Start(defaultConfig)
+	config := defaultConfig
+
+	if p.cfg != "" {
+		cfg, err := ioutil.ReadFile(p.cfg)
+		if err != nil {
+			log.Fatal("could not read yaml configuration file: ", err)
+		}
+		Debugf("Configuration from file:\n- - - - - - - - - - - - -\n%s\n- - - - - - - - - - - - -", cfg)
+		config = string(cfg)
+	}
+
+	code := filerelay.Start(config)
 
 	os.Exit(code)
 
