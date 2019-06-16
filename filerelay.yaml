@@ -1,16 +1,20 @@
-# General purpose
+## General purpose
 
 #host:
 port: 12721
 network-type: tcp
+# number of coroutines for handling requests
 max-routines: 2
 
 
 
-# Memory purpose
+## Memory purpose
 
+# Size of LRU list
 lru-size: 100000
+# Step count of item in skip-lit in every scheduled check
 skiplist-check-step: 20
+
 #min-expiration:
 #slab-check-interval:
 
@@ -19,4 +23,7 @@ skiplist-check-step: 20
 
 #slots-in-slab: 200
 #slabs-in-group: 100
+
+# maximum memory storage for caching; default as 200MB
+#max-storage: 2GB
 

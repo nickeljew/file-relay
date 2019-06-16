@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"fmt"
 	"net"
+	"regexp"
+	"strconv"
 
 	"github.com/sirupsen/logrus"
 
@@ -26,6 +28,11 @@ const (
 	sz64KB
 	sz256KB
 	szMB
+	_
+	_
+	_
+	_
+	szGB
 )
 
 const (
@@ -49,6 +56,8 @@ type MemConfig struct {
 
 	SlotsInSlab int `yaml:"slots-in-slab"`
 	SlabsInGroup int `yaml:"slabs-in-group"`
+
+	MaxStorage string `yaml:"max-storage"` //example: 200MB, 2GB`
 }
 
 func NewMemConfig() *MemConfig {
@@ -65,7 +74,34 @@ func NewMemConfig() *MemConfig {
 	
 		SlotsInSlab: ValFrom(10, 100).(int),
 		SlabsInGroup: ValFrom(10, 100).(int),
+
+		MaxStorage: "200MB",
 	}
+}
+
+func (c *MemConfig) MaxStorageSize() int {
+	defSize := 100 * szMB
+	patn := `^([1-9]\d{0,3})([MG]B)$`
+	reg := regexp.MustCompile(patn)
+	matches := reg.FindAllSubmatch([]byte(c.MaxStorage), -1)
+	if len(matches) == 0 {
+		return defSize
+	}
+
+	parts := matches[0]
+	if len(parts) < 3 {
+		return defSize
+	}
+
+	if num, e := strconv.Atoi(string(parts[1])); e == nil {
+		base := string(parts[2])
+		if base == "MB" && num > 1 {
+			return num * szMB
+		} else if base == "GB" && num > 1 && num <= 8 {
+			return num * szGB
+		}
+	}
+	return defSize
 }
 
 
@@ -77,6 +113,7 @@ type Server struct {
 	hdrNotif chan int
 	quit chan byte
 	memCfg MemConfig
+	maxStorageSize int
 
 	entry *ItemsEntry
 	groups map[int]*SlabGroup
@@ -103,6 +140,7 @@ func NewServer(c *MemConfig) *Server {
 		hdrNotif: make(chan int),
 		quit: make(chan byte),
 		memCfg: *c,
+		maxStorageSize: c.MaxStorageSize(),
 		entry: NewItemsEntry(c.LRUSize, c.SkipListCheckStep),
 		groups: make( map[int]*SlabGroup ),
 	}
