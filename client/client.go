@@ -47,8 +47,8 @@ var (
 func main() {
 	fmt.Println("File-Relay client *", time.Now())
 
-	//doConcurrentSet(1)
-	doSetNGet("test-abc-set-and-get", false)
+	doConcurrentSet(2)
+	//doSetNGet("test-abc-set-and-get", false)
 	
 	os.Exit(0)
 }

@@ -6,6 +6,7 @@ import (
 	"net"
 	"regexp"
 	"strconv"
+	"sync"
 
 	"github.com/sirupsen/logrus"
 
@@ -58,6 +59,11 @@ type MemConfig struct {
 	SlabsInGroup int `yaml:"slabs-in-group"`
 
 	MaxStorage string `yaml:"max-storage"` //example: 200MB, 2GB`
+
+	// the following will not read from configuration data/file
+	maxStorageSize int
+	totalCapacity int
+	sync.Mutex //lock for real-time capacity computing
 }
 
 func NewMemConfig() *MemConfig {
@@ -72,8 +78,8 @@ func NewMemConfig() *MemConfig {
 		SlotCapMin: ValFrom(sz16B, sz64B).(int),
 		SlotCapMax: ValFrom(szKB, sz4KB).(int),
 	
-		SlotsInSlab: ValFrom(10, 100).(int),
-		SlabsInGroup: ValFrom(10, 100).(int),
+		SlotsInSlab: ValFrom(8, 100).(int),
+		SlabsInGroup: ValFrom(1, 100).(int),
 
 		MaxStorage: "200MB",
 	}
@@ -112,9 +118,8 @@ type Server struct {
 	waitlist []net.Conn
 	hdrNotif chan int
 	quit chan byte
-	memCfg MemConfig
-	maxStorageSize int
 
+	memCfg MemConfig
 	entry *ItemsEntry
 	groups map[int]*SlabGroup
 }
@@ -134,13 +139,15 @@ func makeConn(nc net.Conn) *conn {
 
 
 func NewServer(c *MemConfig) *Server {
+	c.maxStorageSize = c.MaxStorageSize()
+	c.totalCapacity = 0
+	Debugf("## Start server with config: %v", c)
 	return &Server{
 		max: c.MaxRoutines,
 		handlers: make([]*handler, 0, c.MaxRoutines),
 		hdrNotif: make(chan int),
 		quit: make(chan byte),
 		memCfg: *c,
-		maxStorageSize: c.MaxStorageSize(),
 		entry: NewItemsEntry(c.LRUSize, c.SkipListCheckStep),
 		groups: make( map[int]*SlabGroup ),
 	}
@@ -184,16 +191,18 @@ func (s *Server) Stop() {
 func (s *Server) initSlabs() {
 	c := s.memCfg.SlotCapMin
 	for {
-		s.groups[c] = NewSlabGroup(c,
-			s.memCfg.SlabsInGroup, s.memCfg.SlotsInSlab, s.memCfg.SlabCheckIntv)
-
-		Debugf("Check group: %d; %d, %v", len(s.groups), c, s.groups[c])
+		g := NewSlabGroup(c,
+			s.memCfg.SlabsInGroup, s.memCfg.SlotsInSlab, s.memCfg.SlabCheckIntv, s.memCfg.maxStorageSize)
+		s.memCfg.totalCapacity += g.Capacity()
+		s.groups[c] = g
+		Debugf("Check group: %d; %d, %v", len(s.groups), c, g)
 
 		c = c << szShift
 		if c > s.memCfg.SlotCapMax {
 			break
 		}
 	}
+	Debug("Total capacity in initialization: ", s.memCfg.totalCapacity)
 }
 
 func (s *Server) clearSlabs() {
@@ -352,10 +361,18 @@ func (h *handler) handleStorage(msgline *MsgLine, rw *bufio.ReadWriter, entry *I
 		if e := makeResp(ResultNotStored); e != nil {
 			return e
 		}
+		return err
 	}
 
 	if e := h.allocSlots(item); e != nil {
 		_log.Error(e.Error())
+
+		_ = entry.Remove(item.key)
+		if e := makeResp(ResultNotStored); e != nil {
+			return e
+		}
+
+		return e
 	}
 
 	bytesLeft := msgline.ValueLen
@@ -382,22 +399,24 @@ func (h *handler) allocSlots(t *MetaItem) error {
 	byteLen := t.byteLen
 	c := h.cfg.SlotCapMax
 	for {
-		//Debugf("Check slab-groups for capacity: %d; Left-bytes: %d", c, byteLen)
+		Debugf("Check slab-groups for capacity: %d; Left-bytes: %d", c, byteLen)
 
-		if byteLen > c {
+		if byteLen >= c || c == h.cfg.SlotCapMin {
 			rest := byteLen % c
-			cnt := (byteLen - rest) / c
-			byteLen = rest
-			if c == h.cfg.SlotCapMin {
+			cnt := 0
+			if byteLen > rest {
+				cnt = (byteLen - rest) / c
+				byteLen = rest
+			}
+
+			// When there are some bytes left and no smaller capacity,
+			// then add one surplus slot to contain the left bytes
+			if byteLen > 0 && c == h.cfg.SlotCapMin {
 				byteLen = 0
 				cnt++
 			}
+
 			if e := h.findSlots(c, cnt, t); e != nil {
-				return e
-			}
-		} else if c == h.cfg.SlotCapMin {
-			byteLen = 0
-			if e := h.findSlots(c, 1, t); e != nil {
 				return e
 			}
 		}
@@ -413,7 +432,7 @@ func (h *handler) allocSlots(t *MetaItem) error {
 
 func (h *handler) findSlots(slotCap, cnt int, t *MetaItem) error {
 	group := h.groups[slotCap]
-	if slots, e := group.FindAvailableSlots(cnt); e == nil {
+	if slots, e := group.FindAvailableSlots(cnt, h.cfg.totalCapacity); e == nil {
 		if len(t.slots) > 0 {
 			t.slots = append(t.slots, slots...)
 		} else {

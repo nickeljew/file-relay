@@ -46,7 +46,17 @@ func (s *Slab) Capacity() int {
 func (s *Slab) FindAvailableSlot() *Slot {
 	s.Lock()
 	defer s.Unlock()
-	
+
+	//slotCnt := s.slots.Len()
+	//for i := 0; i < slotCnt; i++ {
+	//	elem := s.slots.Front()
+	//	slot := elem.Value.(*Slot)
+	//	if slot.CheckClear() {
+	//		s.slots.MoveToBack(elem)
+	//		return slot
+	//	}
+	//}
+
 	elem := s.slots.Front()
 	slot := elem.Value.(*Slot)
 	if slot.CheckClear() {
@@ -92,7 +102,10 @@ func (s *Slab) tryClearFromLast(n int) (el *list.Element) {
 
 type SlabGroup struct {
 	slotCap int
-	slotCount int
+	slotSum int
+	checkIntv int
+
+	maxStorageSize int
 	totalCap int
 
 	slabs *list.List
@@ -101,55 +114,91 @@ type SlabGroup struct {
 
 type SlabCh chan *Slab
 
-func NewSlabGroup(slotCap, slabCount, slotCount, checkIntv int) *SlabGroup {
+func NewSlabGroup(slotCap, slabCount, slotCount, checkIntv, maxSize int) *SlabGroup {
 	group := SlabGroup{
 		slotCap: slotCap,
-		slotCount: slotCount,
+		checkIntv: checkIntv,
+		maxStorageSize: maxSize,
 		slabs: list.New(),
 	}
-	for i := 0; i < slabCount; i++ {
-		group.slabs.PushBack( NewSlab(slotCap, slotCount, checkIntv) )
-	}
+	//for i := 0; i < slabCount; i++ {
+	//	group.slabs.PushBack( NewSlab(slotCap, slotCount, checkIntv) )
+	//}
+	_ = group.AddSlabs(slabCount, slotCount)
+
 	return &group
 }
 
-func (g *SlabGroup) SlotSum() int {
-	return g.slotCount * g.slabs.Len()
+func (g *SlabGroup) AddSlabs(slabCount, slotCount int) (cap int) {
+	for i := 0; i < slabCount; i++ {
+		s := NewSlab(g.slotCap, slotCount, g.checkIntv)
+		g.slotSum += slotCount
+		cap += s.Capacity()
+		g.slabs.PushBack(s)
+	}
+	g.totalCap += cap
+	return
 }
 
-func (g *SlabGroup) FindAvailableSlots(need int) (s []*Slot, e error) {
+func (g *SlabGroup) SlotSum() int {
+	return g.slotSum
+}
+
+func (g *SlabGroup) Capacity() int {
+	return g.totalCap
+}
+
+func (g *SlabGroup) FindAvailableSlots(need, currentTotalCap int) (s []*Slot, e error) {
 	if need > g.SlotSum() {
 		return nil, errors.New("too many slots to request")
 	}
 
 	s = make([]*Slot, 0, need)
 	result := make(SlabCh)
-	conc, did, cnt, left := slabsCheckConc, 0, need, g.slabs.Len()
+	conc, cnt := slabsCheckConc, need
+	SlabSum := g.slabs.Len()
+	slabsLeft, slotsLeft := SlabSum, g.slotSum
 	if conc > need {
 		conc = need
 	}
-	//Debugf("-- Find for Cap: %d - Need: %d, Total: %d", g.slotCap, need, left)
+	if sl := g.slabs.Len(); conc > sl {
+		conc = sl
+	}
+	Debugf("-- Find for Cap: %d - Need-slots: %d, Total-slabs: %d, Total-slots: %d; conc: %d", g.slotCap, need, slabsLeft, slotsLeft, conc)
 
 	ForEnd:
 	for {
-		if cnt > 0 && left > 0 {
-			did, left = g.doCheck(conc, left, result)
-			cnt -= did
+		if cnt == 0 || slotsLeft == 0 {
+			break
 		}
+		if slabsLeft == 0 {
+			slabsLeft = SlabSum
+		}
+
+		_, slabsLeft = g.doCheck(conc, slabsLeft, result)
+		//Debugf("-- Loop for finding slot: %d - Slabs-left: %d, Slots-left: %d, Need-slots-left: %d", g.slotCap, slabsLeft, slotsLeft, cnt)
 
 		select {
 		case slab := <- result:
-			conc = 1
 			if slab == nil {
-				continue
+				panic("No slab found")
 			}
+
+			//g.Lock()
+
+			conc = 1
 			slot := slab.FindAvailableSlot()
+			slotsLeft--
 			if slot != nil {
 				s = append(s, slot)
+				cnt--
 			}
-			//Debugf("-- Next for Cap: %d - Need-left: %d, Slots: %d", g.slotCap, cnt, len(s))
 
-			if len(s) >= need {
+			//g.Unlock()
+
+			got := len(s)
+			//Debugf("-- Next for Cap: %d - Need-slots-left: %d, Got-slots: %d", g.slotCap, cnt, got)
+			if got >= need {
 				//break //Fuck there! can't break the loop inside select
 				break ForEnd
 			}
@@ -158,15 +207,21 @@ func (g *SlabGroup) FindAvailableSlots(need int) (s []*Slot, e error) {
 
 	if cnt > 0 {
 		e = errors.New("no enough slots")
+
+		if currentTotalCap < g.maxStorageSize {
+			//
+		}
 	}
-	Debugf(" - finished for Cap: %d - got: %d, Total-slots-left: %d", g.slotCap, len(s), left)
+	Debugf(" - finished for Cap: %d - got: %d, Slots-left: %d (%d)", g.slotCap, len(s), slotsLeft, g.slotSum)
 	return
 }
 
 func (g *SlabGroup) doCheck(conc, total int, r SlabCh) (did, left int) {
+	did = 0
 	left = total
+
 	for {
-		if did >= conc || left <= 0 {
+		if did >= conc /*|| left <= 0*/ {
 			return
 		}
 		go g.getSlabForCheck(r)
@@ -177,10 +232,11 @@ func (g *SlabGroup) doCheck(conc, total int, r SlabCh) (did, left int) {
 
 func (g *SlabGroup) getSlabForCheck(r SlabCh) {
 	g.Lock()
-	defer g.Unlock()
-	
+
 	elem := g.slabs.Front()
 	slab := elem.Value.(*Slab)
 	g.slabs.MoveToBack(elem)
 	r <- slab
+
+	g.Unlock()
 }
