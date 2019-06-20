@@ -382,7 +382,7 @@ func (h *handler) handleStorage(msgline *MsgLine, rw *bufio.ReadWriter, entry *I
 		s.SetInfoWithItem(item)
 		if n, e := s.ReadAndSet(msgline.Key, rw, bytesLeft); e != nil {
 			_log.Error(e.Error())
-			break
+			return e
 		} else {
 			bytesLeft -= n
 		}

@@ -7,6 +7,15 @@ import (
 )
 
 
+const _ReserveLimit = time.Second * 2
+
+func timePassed(afteThan time.Time, limits time.Duration) bool {
+	now := time.Now()
+	diff := now.Sub(afteThan)
+	return diff > limits
+}
+
+
 
 type Slot struct {
 	key string
@@ -15,6 +24,8 @@ type Slot struct {
 	used int
 	setAt time.Time
 	duration time.Duration
+
+	reservedAt time.Time
 }
 
 func NewSlot(capacity int) (s *Slot) {
@@ -42,12 +53,9 @@ func (s *Slot) Occupied() bool {
 
 func (s *Slot) Vacant() bool {
 	if s.used == 0 || s.duration == 0 {
-		return true
+		return timePassed(s.reservedAt, _ReserveLimit)
 	}
-
-	now := time.Now()
-	diff := now.Sub(s.setAt)
-	return diff > s.duration
+	return timePassed(s.setAt, s.duration)
 }
 
 func (s *Slot) CheckClear() bool {

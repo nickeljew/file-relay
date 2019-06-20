@@ -47,16 +47,6 @@ func (s *Slab) FindAvailableSlot() *Slot {
 	s.Lock()
 	defer s.Unlock()
 
-	//slotCnt := s.slots.Len()
-	//for i := 0; i < slotCnt; i++ {
-	//	elem := s.slots.Front()
-	//	slot := elem.Value.(*Slot)
-	//	if slot.CheckClear() {
-	//		s.slots.MoveToBack(elem)
-	//		return slot
-	//	}
-	//}
-
 	elem := s.slots.Front()
 	slot := elem.Value.(*Slot)
 	if slot.CheckClear() {
@@ -121,9 +111,7 @@ func NewSlabGroup(slotCap, slabCount, slotCount, checkIntv, maxSize int) *SlabGr
 		maxStorageSize: maxSize,
 		slabs: list.New(),
 	}
-	//for i := 0; i < slabCount; i++ {
-	//	group.slabs.PushBack( NewSlab(slotCap, slotCount, checkIntv) )
-	//}
+
 	_ = group.AddSlabs(slabCount, slotCount)
 
 	return &group
@@ -175,7 +163,7 @@ func (g *SlabGroup) FindAvailableSlots(need, currentTotalCap int) (s []*Slot, e 
 			slabsLeft = SlabSum
 		}
 
-		_, slabsLeft = g.doCheck(conc, slabsLeft, result)
+		slabsLeft = g.doCheck(conc, slabsLeft, result)
 		//Debugf("-- Loop for finding slot: %d - Slabs-left: %d, Slots-left: %d, Need-slots-left: %d", g.slotCap, slabsLeft, slotsLeft, cnt)
 
 		select {
@@ -184,8 +172,6 @@ func (g *SlabGroup) FindAvailableSlots(need, currentTotalCap int) (s []*Slot, e 
 				panic("No slab found")
 			}
 
-			//g.Lock()
-
 			conc = 1
 			slot := slab.FindAvailableSlot()
 			slotsLeft--
@@ -193,8 +179,6 @@ func (g *SlabGroup) FindAvailableSlots(need, currentTotalCap int) (s []*Slot, e 
 				s = append(s, slot)
 				cnt--
 			}
-
-			//g.Unlock()
 
 			got := len(s)
 			//Debugf("-- Next for Cap: %d - Need-slots-left: %d, Got-slots: %d", g.slotCap, cnt, got)
@@ -216,18 +200,13 @@ func (g *SlabGroup) FindAvailableSlots(need, currentTotalCap int) (s []*Slot, e 
 	return
 }
 
-func (g *SlabGroup) doCheck(conc, total int, r SlabCh) (did, left int) {
-	did = 0
-	left = total
-
-	for {
-		if did >= conc /*|| left <= 0*/ {
-			return
-		}
+func (g *SlabGroup) doCheck(conc, total int, r SlabCh) int {
+	left := total
+	for i := 0; i < conc; i++ {
 		go g.getSlabForCheck(r)
-		did++
 		left--
 	}
+	return left
 }
 
 func (g *SlabGroup) getSlabForCheck(r SlabCh) {
