@@ -37,9 +37,6 @@ func init() {
 //
 func ParseConfig(rawCfg string) (*MemConfig, error) {
 	cfg := NewMemConfig()
-	//cfg.Port = PORT
-	//cfg.NetworkType = NetType
-	//cfg.MaxRoutines = 2
 
 	if e := yaml.Unmarshal([]byte(rawCfg), cfg); e != nil {
 		return nil, e

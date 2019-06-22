@@ -13,8 +13,7 @@ func Debug(a ...interface{}) {
 }
 
 func Debugf(s string, a ...interface{}) {
-	fmt.Printf(s, a...)
-	fmt.Println()
+	fmt.Printf(s + "\n", a...)
 }
 
 

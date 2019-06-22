@@ -3,6 +3,7 @@ package filerelay
 import (
 	"bufio"
 	"fmt"
+	"math"
 	"net"
 	"regexp"
 	"strconv"
@@ -118,10 +119,13 @@ type Server struct {
 	waitlist []net.Conn
 	hdrNotif chan int
 	quit chan byte
+	connCount uint64
 
 	memCfg MemConfig
 	entry *ItemsEntry
 	groups map[int]*SlabGroup
+
+	sync.Mutex
 }
 
 //
@@ -162,6 +166,7 @@ func (s *Server) Start() {
 		case i = <- s.hdrNotif:
 			if i >= 0 && len(s.waitlist) > 0 {
 				h := s.handlers[i]
+				s.Lock()
 				if !h.running {
 					c := s.waitlist[0]
 					s.waitlist = s.waitlist[1:]
@@ -170,12 +175,15 @@ func (s *Server) Start() {
 						log.Error("failed to process connection: ", e.Error())
 					}
 				}
+				s.Unlock()
 			}
 		case <- s.quit:
 			log.Info("Quit server")
+			s.Lock()
 			for _, h := range s.handlers {
 				h.quit <- 0
 			}
+			s.Unlock()
 			return
 		}
 	}
@@ -230,8 +238,15 @@ func (s *Server) Handle(nc net.Conn) {
 
 //
 func (s *Server) handleConn(nc net.Conn) error {
+	s.Lock()
+
 	cnt := len(s.handlers)
-	Debug("* Running handlers: ", cnt)
+
+	if s.connCount == math.MaxUint64 {
+		s.connCount = 0
+	}
+	s.connCount++
+	Debug("* Running handlers: ", cnt, s.connCount)
 
 	var hdr *handler
 
@@ -243,20 +258,22 @@ func (s *Server) handleConn(nc net.Conn) error {
 		}
 	}
 
+	if hdr == nil && cnt < s.max {
+		Debug("* Get new handler: ", cnt)
+		hdr = newHandler(cnt - 1, s.hdrNotif, &s.memCfg, s.groups)
+		s.handlers = append(s.handlers, hdr)
+	}
+
 	if hdr == nil {
-		Debug("* Get new handler or wait in line")
-		if cnt < s.max {
-			hdr = newHandler(cnt - 1, s.hdrNotif, &s.memCfg, s.groups)
-			s.handlers = append(s.handlers, hdr)
-		}
+		Debug("* Put into wait-list")
+		s.waitlist = append(s.waitlist, nc)
+
+		s.Unlock()
+		return nil
 	}
 
-	if hdr != nil {
-		return hdr.process(makeConn(nc), s.entry)
-	}
-
-	s.waitlist = append(s.waitlist, nc)
-	return nil
+	s.Unlock()
+	return hdr.process(makeConn(nc), s.entry)
 }
 
 
@@ -303,7 +320,7 @@ func (h *handler) process(cn *conn, entry *ItemsEntry) error {
 
 	msgline := &MsgLine{}
 	msgline.parseLine(line)
-	Debugf(" - Recv: %T %v\n\n", msgline, msgline)
+	Debugf(" - Recv: %T %v\n - - -", msgline, msgline)
 
 	var storeCmds = map[string]bool{
 		"set": true,
@@ -311,15 +328,15 @@ func (h *handler) process(cn *conn, entry *ItemsEntry) error {
 		"replace": true,
 	}
 	if storeCmds[msgline.Cmd] {
-		if e := h.handleStorage(msgline, cn.rw, entry); e != nil {
-			return e
-		}
+		return h.handleStorage(msgline, cn.rw, entry)
 	} else if msgline.Cmd == "get" || msgline.Cmd == "gets" {
-		if e := h.handleRetrieval(msgline, cn.rw, entry); e != nil {
-			return e
-		}
+		return h.handleRetrieval(msgline, cn.rw, entry)
 	}
 
+	log.WithFields(logrus.Fields{
+		"cmd": msgline.Cmd,
+		"itemKey": msgline.Key,
+	}).Warn("Unsupported command")
 	return nil
 }
 
@@ -337,14 +354,16 @@ func (h *handler) handleStorage(msgline *MsgLine, rw *bufio.ReadWriter, entry *I
 		exp = h.cfg.MinExpiration
 	}
 
-	makeResp := func(cmd []byte) error {
+	makeResp := func(cmd []byte) {
 		if _, e := rw.Write(cmd); e != nil {
-			return e
+			_log.Error(e.Error())
 		}
 		if e := rw.Flush(); e != nil {
-			return e
+			_log.Error(e.Error())
 		}
-		return nil
+	}
+	failResp := func() {
+		makeResp(ResultStored)
 	}
 
 	item := NewMetaItem(msgline.Key, msgline.Flags, exp, msgline.ValueLen)
@@ -358,20 +377,15 @@ func (h *handler) handleStorage(msgline *MsgLine, rw *bufio.ReadWriter, entry *I
 		err = entry.Replace(item)
 	}
 	if err != nil {
-		if e := makeResp(ResultNotStored); e != nil {
-			return e
-		}
+		failResp()
 		return err
 	}
 
 	if e := h.allocSlots(item); e != nil {
 		_log.Error(e.Error())
-
 		_ = entry.Remove(item.key)
-		if e := makeResp(ResultNotStored); e != nil {
-			return e
-		}
 
+		failResp()
 		return e
 	}
 
@@ -382,15 +396,16 @@ func (h *handler) handleStorage(msgline *MsgLine, rw *bufio.ReadWriter, entry *I
 		s.SetInfoWithItem(item)
 		if n, e := s.ReadAndSet(msgline.Key, rw, bytesLeft); e != nil {
 			_log.Error(e.Error())
+			Debug(" - Read data failure: ", e.Error())
+
+			failResp()
 			return e
 		} else {
 			bytesLeft -= n
 		}
 	}
 
-	if e := makeResp(ResultStored); e != nil {
-		return e
-	}
+	makeResp(ResultStored)
 	return nil
 }
 
@@ -446,53 +461,61 @@ func (h *handler) findSlots(slotCap, cnt int, t *MetaItem) error {
 
 
 func (h *handler) handleRetrieval(msgline *MsgLine, rw *bufio.ReadWriter, entry *ItemsEntry) error {
-	//_log := log.WithFields(logrus.Fields{
-	//	"cmd": msgline.Cmd,
-	//	"itemKey": msgline.Key,
-	//})
+	_log := log.WithFields(logrus.Fields{
+		"cmd": msgline.Cmd,
+		"itemKey": msgline.Key,
+	})
+
+	endResp := func() {
+		if _, e := rw.Write(ResultEnd); e != nil {
+			_log.Error(e.Error())
+		}
+		if e := rw.Flush(); e != nil {
+			_log.Error(e.Error())
+		}
+	}
 
 	item := entry.Get(msgline.Key)
 	if item == nil {
 		item = NewMetaItem(msgline.Key, 0, 0, 0)
 	}
 
-	if e := h.writeRespFirstLine(item, rw); e != nil {
-		return e
-	}
-
 	// Write value block and end with \r\n
 	if item.byteLen > 0 && len(item.slots) > 0 {
-		ok := true
+		byteLen := item.byteLen
 		for _, s := range item.slots {
 			if s.Vacant() {
-				ok = false
+				byteLen = 0
 				break
 			}
 		}
-		if ok {
+
+		if e := h.writeRespFirstLine(item, rw, byteLen); e != nil {
+			endResp()
+			return e
+		}
+
+		if byteLen > 0 {
 			for _, s := range item.slots {
 				bytes := s.data[:s.used]
 				if _, e := rw.Write(bytes); e != nil {
+					endResp()
 					return e
 				}
 			}
 			if _, e := rw.Write([]byte("\r\n")); e != nil {
+				endResp()
 				return e
 			}
 		}
 	}
 
-	if _, err := rw.Write(ResultEnd); err != nil {
-		return err
-	}
-	if err := rw.Flush(); err != nil {
-		return err
-	}
+	endResp()
 	return nil
 }
 
-func (h *handler) writeRespFirstLine(item *MetaItem, rw *bufio.ReadWriter) error {
-	line := fmt.Sprintf("VALUE %s %d %d\r\n", item.key, item.flags, item.byteLen)
+func (h *handler) writeRespFirstLine(item *MetaItem, rw *bufio.ReadWriter, byteLen int) error {
+	line := fmt.Sprintf("VALUE %s %d %d\r\n", item.key, item.flags, byteLen)
 	if _, err := rw.Write([]byte(line)); err != nil {
 		return err
 	}
