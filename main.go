@@ -35,8 +35,7 @@ skiplist-check-step: 20
 
 
 var (
-	logger = logrus.New()
-	log = logger.WithFields(logrus.Fields{
+	logger = logrus.New().WithFields(logrus.Fields{
 		"name": "file-relay",
 		"pkg": "main",
 	})
@@ -83,11 +82,11 @@ func main() {
 	if p.cpu != "" {
 		f, err := os.Create(p.cpu)
 		if err != nil {
-			log.Fatal("could not create CPU profile: ", err)
+			logger.Fatal("could not create CPU profile: ", err)
 		}
 		defer f.Close()
 		if e := pprof.StartCPUProfile(f); e != nil {
-			log.Fatal("could not start CPU profile: ", e)
+			logger.Fatal("could not start CPU profile: ", e)
 		}
 		defer pprof.StopCPUProfile()
 	}
@@ -95,12 +94,12 @@ func main() {
 	if p.mem != "" {
 		f, err := os.Create(p.mem)
 		if err != nil {
-			log.Fatal("could not create memory profile: ", err)
+			logger.Fatal("could not create memory profile: ", err)
 		}
 		defer f.Close()
 		runtime.GC() // get up-to-date statistics
 		if e := pprof.WriteHeapProfile(f); e != nil {
-			log.Fatal("could not write memory profile: ", e)
+			logger.Fatal("could not write memory profile: ", e)
 		}
 	}
 
@@ -109,7 +108,7 @@ func main() {
 	if p.cfg != "" {
 		cfg, err := ioutil.ReadFile(p.cfg)
 		if err != nil {
-			log.Fatal("could not read yaml configuration file: ", err)
+			logger.Fatal("could not read yaml configuration file: ", err)
 		}
 		dtrace.Logf("Configuration from file:\n- - - - - - - - - - - - -\n%s\n- - - - - - - - - - - - -", cfg)
 		config = string(cfg)
