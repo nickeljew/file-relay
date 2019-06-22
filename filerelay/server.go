@@ -363,7 +363,7 @@ func (h *handler) handleStorage(msgline *MsgLine, rw *bufio.ReadWriter, entry *I
 		}
 	}
 	failResp := func() {
-		makeResp(ResultStored)
+		makeResp(ResultNotStored)
 	}
 
 	item := NewMetaItem(msgline.Key, msgline.Flags, exp, msgline.ValueLen)

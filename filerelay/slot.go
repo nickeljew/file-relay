@@ -82,7 +82,7 @@ func (s *Slot) SetInfoWithItem(t *MetaItem) {
 
 func (s *Slot) ReadAndSet(key string, r io.Reader, byteLen int) (n int, err error) {
 	if s.Occupied() {
-		errInfo := fmt.Sprintf("slot is occupied: %d", s.capacity)
+		errInfo := fmt.Sprintf("slot is occupied by %s[%d]; tried by: %s", s.key, s.capacity, key)
 		return 0, errors.New(errInfo)
 	}
 	if l := len(key); l == 0 || l > KeyMax {
