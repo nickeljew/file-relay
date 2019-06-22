@@ -9,8 +9,6 @@ import (
 
 	//"github.com/sirupsen/logrus"
 	"github.com/huandu/skiplist"
-
-	. "github.com/nickeljew/file-relay/debug"
 )
 
 
@@ -47,7 +45,7 @@ func (t *MetaItem) ClearSlots() {
 func (t *MetaItem) Expired() bool {
 	now := time.Now()
 	diff := now.Sub(t.setAt)
-	Debugf(" - check item expiration -> setAt: %v | now: %v | diff: %v", t.setAt, now, diff)
+	mtrace.Logf(" - check item expiration -> setAt: %v | now: %v | diff: %v", t.setAt, now, diff)
 	return diff > t.duration
 }
 
@@ -207,7 +205,7 @@ func (e *ItemsEntry) StartCheck() {
 		case <-t.C:
 			e.ScheduledCheck()
 		case <- e.quit:
-			log.Info("Quit ItemsEntry")
+			logger.Info("Quit ItemsEntry")
 			return
 		}
 	}
@@ -232,7 +230,7 @@ func (e *ItemsEntry) ScheduledCheck() {
 
 	steps := e.checkSteps
 	if listLen < steps {
-		Debug("ItemsEntry len: ", listLen)
+		mtrace.Log("ItemsEntry len: ", listLen)
 		steps = listLen
 	}
 
@@ -245,7 +243,7 @@ func (e *ItemsEntry) ScheduledCheck() {
 		elem := e.checkpoint.Value.(*linkedlist.Element)
 		if elem != nil {
 			item := elem.Value.(*MetaItem)
-			Debugf("ItemsEntry check steps: %d; key: %s", steps, item.key)
+			mtrace.Logf("ItemsEntry check steps: %d; key: %s", steps, item.key)
 
 			if item != nil && item.Expired() {
 				_ = e.lru.Remove(item.key)
@@ -269,13 +267,13 @@ func (e *ItemsEntry) movePoint(key string) {
 	}
 
 	k := e.checkpoint.Key().(string)
-	Debug("Current checkpoint key: ", k)
+	mtrace.Log("Current checkpoint key: ", k)
 	if k == key {
 		e.checkpoint = e.checkpoint.Next()
 		if e.checkpoint == nil {
-			Debug("After removed, checkpoint is nil")
+			mtrace.Log("After removed, checkpoint is nil")
 		} else {
-			Debug("After removed, checkpoint key: ", e.checkpoint.Key().(string))
+			mtrace.Log("After removed, checkpoint key: ", e.checkpoint.Key().(string))
 		}
 	}
 }

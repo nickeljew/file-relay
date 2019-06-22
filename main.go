@@ -40,6 +40,9 @@ var (
 		"name": "file-relay",
 		"pkg": "main",
 	})
+
+
+	dtrace = NewDTrace("main")
 )
 
 
@@ -108,7 +111,7 @@ func main() {
 		if err != nil {
 			log.Fatal("could not read yaml configuration file: ", err)
 		}
-		Debugf("Configuration from file:\n- - - - - - - - - - - - -\n%s\n- - - - - - - - - - - - -", cfg)
+		dtrace.Logf("Configuration from file:\n- - - - - - - - - - - - -\n%s\n- - - - - - - - - - - - -", cfg)
 		config = string(cfg)
 	}
 

@@ -6,8 +6,6 @@ import (
 	"math"
 	"sync"
 	"time"
-
-	. "github.com/nickeljew/file-relay/debug"
 )
 
 const (
@@ -155,7 +153,7 @@ func (g *SlabGroup) FindAvailableSlots(need, currentTotalCap int) (s []*Slot, e 
 	if sl := g.slabs.Len(); conc > sl {
 		conc = sl
 	}
-	Debugf("-- Find for Cap: %d - Need-slots: %d, Total-slabs: %d, Total-slots: %d; conc: %d", g.slotCap, need, slabsLeft, slotsLeft, conc)
+	mtrace.Logf("-- Find for Cap: %d - Need-slots: %d, Total-slabs: %d, Total-slots: %d; conc: %d", g.slotCap, need, slabsLeft, slotsLeft, conc)
 
 	ForEnd:
 	for {
@@ -167,7 +165,7 @@ func (g *SlabGroup) FindAvailableSlots(need, currentTotalCap int) (s []*Slot, e 
 		}
 
 		slabsLeft = g.doCheck(conc, slabsLeft, result)
-		//Debugf("-- Loop for finding slot: %d - Slabs-left: %d, Slots-left: %d, Need-slots-left: %d", g.slotCap, slabsLeft, slotsLeft, cnt)
+		//mtrace.Logf("-- Loop for finding slot: %d - Slabs-left: %d, Slots-left: %d, Need-slots-left: %d", g.slotCap, slabsLeft, slotsLeft, cnt)
 
 		select {
 		case slab := <- result:
@@ -184,7 +182,7 @@ func (g *SlabGroup) FindAvailableSlots(need, currentTotalCap int) (s []*Slot, e 
 			}
 
 			got := len(s)
-			//Debugf("-- Next for Cap: %d - Need-slots-left: %d, Got-slots: %d", g.slotCap, cnt, got)
+			//mtrace.Logf("-- Next for Cap: %d - Need-slots-left: %d, Got-slots: %d", g.slotCap, cnt, got)
 			if got >= need {
 				//break //Fuck there! can't break the loop inside select
 				break ForEnd
@@ -199,7 +197,7 @@ func (g *SlabGroup) FindAvailableSlots(need, currentTotalCap int) (s []*Slot, e 
 			//
 		}
 	}
-	Debugf(" - finished for Cap: %d - got: %d, Slots-left: %d (%d)", g.slotCap, len(s), slotsLeft, g.slotSum)
+	mtrace.Logf(" - finished for Cap: %d - got: %d, Slots-left: %d (%d)", g.slotCap, len(s), slotsLeft, g.slotSum)
 	return
 }
 

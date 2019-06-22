@@ -13,25 +13,28 @@ import (
 
 
 var (
-	logger = logrus.New()
-	log = logger.WithFields(logrus.Fields{
+	rootLogger = logrus.New()
+	logger = rootLogger.WithFields(logrus.Fields{
 		"name": "file-relay",
 		"pkg": "filerelay",
 	})
+
+	dtrace = NewDTrace("filerelay")
+	mtrace = NewDTrace("filerelay:mem")
 )
 
 
 //
 func init() {
 	// Log as JSON instead of the default ASCII formatter.
-	logger.SetFormatter(&logrus.JSONFormatter{})
+	rootLogger.SetFormatter(&logrus.JSONFormatter{})
   
 	// Output to stdout instead of the default stderr
 	// Can be any io.Writer, see below for File example
-	logger.SetOutput(os.Stdout)
+	rootLogger.SetOutput(os.Stdout)
   
 	// Only log the warning severity or above.
-	logger.SetLevel(logrus.InfoLevel)
+	rootLogger.SetLevel(logrus.InfoLevel)
 }
 
 
@@ -59,17 +62,17 @@ func InitClientConfig(host string) (*Config, error) {
 func Start(rawCfg string) int {
 	cfg, err := ParseConfig(rawCfg)
 	if err != nil {
-		log.Errorf("Error parsing config: %v", err.Error())
+		logger.Errorf("Error parsing config: %v", err.Error())
 		return 1
 	}
-	Debugf("## Init with config: %+v", cfg)
+	dtrace.Logf("## Init with config: %+v", cfg)
 
 	lis, err2 := net.Listen(cfg.NetworkType, cfg.Addr())
 	if err2 != nil {
-		log.Errorf("Error listening: %v", err2.Error())
+		logger.Errorf("Error listening: %v", err2.Error())
 		return 1
 	}
-	log.Infof("Server is listening at: %v", cfg.Addr())
+	logger.Infof("Server is listening at: %v", cfg.Addr())
 	defer lis.Close()
 
 	server := NewServer(cfg)
@@ -83,11 +86,11 @@ func Start(rawCfg string) int {
         // Listen for an incoming connection.
         conn, err := lis.Accept()
         if err != nil {
-            log.Error("Error accepting: ", err.Error())
+			logger.Errorf("Error accepting: %v", err.Error())
             return 1
         }
 		// Handle connections in a new goroutine.
-		log.Info("# New incoming connection")
+		logger.Info("# New incoming connection")
 		if cIndex == math.MaxUint64 {
 			cIndex = 0
 		}

@@ -151,7 +151,7 @@ func MakeServConn(nc net.Conn, index uint64) *ServConn {
 func NewServer(c *MemConfig) *Server {
 	c.maxStorageSize = c.MaxStorageSize()
 	c.totalCapacity = 0
-	Debugf("## Start server with config: %+v", c)
+	dtrace.Logf("## Start server with config: %+v", c)
 	return &Server{
 		max: c.MaxRoutines,
 		handlers: make([]*handler, 0, c.MaxRoutines),
@@ -176,15 +176,15 @@ func (s *Server) Start() {
 				if !h.running {
 					sc := s.waitlist[0]
 					s.waitlist = s.waitlist[1:]
-					Debug("* Pop from wait-list for handler: ", i)
+					dtrace.Log("* Pop from wait-list for handler: ", i)
 					if e := h.process(sc, s.entry); e != nil {
-						log.Errorf("failed to process connection: %v", e.Error())
+						logger.Errorf("failed to process connection: %v", e.Error())
 					}
 				}
 				s.Unlock()
 			}
 		case <- s.quit:
-			log.Info("Quit server")
+			logger.Info("Quit server")
 			s.Lock()
 			for _, h := range s.handlers {
 				h.quit <- 0
@@ -209,14 +209,14 @@ func (s *Server) initSlabs() {
 			s.memCfg.SlabsInGroup, s.memCfg.SlotsInSlab, s.memCfg.SlabCheckIntv, s.memCfg.maxStorageSize)
 		s.memCfg.totalCapacity += g.Capacity()
 		s.groups[c] = g
-		Debugf("Check group: %d; %d, %v", len(s.groups), c, g)
+		dtrace.Logf("Check group: %d; %d, %v", len(s.groups), c, g)
 
 		c = c << szShift
 		if c > s.memCfg.SlotCapMax {
 			break
 		}
 	}
-	Debug("Total capacity in initialization: ", s.memCfg.totalCapacity)
+	dtrace.Log("Total capacity in initialization: ", s.memCfg.totalCapacity)
 }
 
 func (s *Server) clearSlabs() {
@@ -235,10 +235,10 @@ func (s *Server) clearSlabs() {
 //
 func (s *Server) Handle(sc *ServConn) {
 	if err := s.handleConn(sc); err != nil {
-		log.Errorf("error in handling connection: %v", err.Error())
+		logger.Errorf("error in handling connection: %v", err.Error())
 	}
 	if err := sc.nc.Close(); err != nil {
-		log.Error("error in closing connection")
+		logger.Error("error in closing connection")
 	}
 }
 
@@ -247,26 +247,26 @@ func (s *Server) handleConn(sc *ServConn) error {
 	s.Lock()
 
 	cnt := len(s.handlers)
-	Debug("* Running handlers: ", cnt, sc.index)
+	dtrace.Log("* Running handlers: ", cnt, sc.index)
 
 	var hdr *handler
 
 	for i, h := range s.handlers {
 		if h != nil && !h.running {
-			Debug("** Using handler: ", i)
+			dtrace.Log("** Using handler: ", i)
 			hdr = h
 			break
 		}
 	}
 
 	if hdr == nil && cnt < s.max {
-		Debug("* Get new handler: ", cnt)
+		dtrace.Log("* Get new handler: ", cnt)
 		hdr = newHandler(cnt - 1, s.hdrNotif, &s.memCfg, s.groups)
 		s.handlers = append(s.handlers, hdr)
 	}
 
 	if hdr == nil {
-		Debug("* Put into wait-list")
+		dtrace.Log("* Put into wait-list")
 		s.waitlist = append(s.waitlist, sc)
 
 		s.Unlock()
@@ -303,7 +303,7 @@ func newHandler(idx int, notif chan int, c *MemConfig, groups map[int]*SlabGroup
 }
 
 func (h *handler) process(sc *ServConn, entry *ItemsEntry) error {
-	//Debug("Nothing here in handler...")
+	//dtrace.Log("Nothing here in handler...")
 
 	h.running = true
 
@@ -321,13 +321,13 @@ func (h *handler) process(sc *ServConn, entry *ItemsEntry) error {
 
 	msgline := &MsgLine{}
 	msgline.parseLine(line)
-	Debugf(" - Recv: %T %v\n - - -", msgline, msgline)
+	dtrace.Logf(" - Recv: %T %v\n - - -", msgline, msgline)
 
-	_log := log.WithFields(logrus.Fields{
+	log := logger.WithFields(logrus.Fields{
 		"cmd": msgline.Cmd,
 		"itemKey": msgline.Key,
 	})
-	_log.Info("Incoming command")
+	log.Info("Incoming command")
 
 	if _StoreCmds[msgline.Cmd] {
 		return h.handleStorage(msgline, sc.rw, entry)
@@ -335,14 +335,14 @@ func (h *handler) process(sc *ServConn, entry *ItemsEntry) error {
 		return h.handleRetrieval(msgline, sc.rw, entry)
 	}
 
-	_log.Warn("Unsupported command")
+	log.Warn("Unsupported command")
 	return nil
 }
 
 
 
 func (h *handler) handleStorage(msgline *MsgLine, rw *bufio.ReadWriter, entry *ItemsEntry) error {
-	_log := log.WithFields(logrus.Fields{
+	log := logger.WithFields(logrus.Fields{
 		"cmd": msgline.Cmd,
 		"itemKey": msgline.Key,
 		"valueLen": msgline.ValueLen,
@@ -355,15 +355,15 @@ func (h *handler) handleStorage(msgline *MsgLine, rw *bufio.ReadWriter, entry *I
 
 	makeResp := func(cmd []byte) {
 		if _, e := rw.Write(cmd); e != nil {
-			_log.Errorf("Write buffer error: %v", e.Error())
+			log.Errorf("Write buffer error: %v", e.Error())
 		}
 		if e := rw.Flush(); e != nil {
-			_log.Errorf("Flush buffer error: %v", e.Error())
+			log.Errorf("Flush buffer error: %v", e.Error())
 		}
 	}
 	failResp := func(e error) {
 		makeResp(ResultNotStored)
-		Debugf("Storage request failure for key '%s': %v", msgline.Key, e.Error())
+		dtrace.Logf("Storage request failure for key '%s': %v", msgline.Key, e.Error())
 	}
 
 	item := NewMetaItem(msgline.Key, msgline.Flags, exp, msgline.ValueLen)
@@ -382,7 +382,7 @@ func (h *handler) handleStorage(msgline *MsgLine, rw *bufio.ReadWriter, entry *I
 	}
 
 	if e := h.allocSlots(item); e != nil {
-		_log.Errorf("Allocate slots error: %v", e.Error())
+		log.Errorf("Allocate slots error: %v", e.Error())
 		_ = entry.Remove(item.key)
 
 		failResp(e)
@@ -391,12 +391,12 @@ func (h *handler) handleStorage(msgline *MsgLine, rw *bufio.ReadWriter, entry *I
 
 	bytesLeft := msgline.ValueLen
 	for i, s := range item.slots {
-		Debugf(" - Slot[%d]: %d, byte-left: %d", s.capacity, i, bytesLeft)
+		dtrace.Logf(" - Slot[%d]: %d, byte-left: %d", s.capacity, i, bytesLeft)
 
 		s.SetInfoWithItem(item)
 		if n, e := s.ReadAndSet(msgline.Key, rw, bytesLeft); e != nil {
-			_log.Errorf("Error when read buffer and set into slot: %v", e.Error())
-			Debug(" - Read data failure: ", e.Error())
+			log.Errorf("Error when read buffer and set into slot: %v", e.Error())
+			dtrace.Log(" - Read data failure: ", e.Error())
 
 			failResp(e)
 			return e
@@ -406,8 +406,8 @@ func (h *handler) handleStorage(msgline *MsgLine, rw *bufio.ReadWriter, entry *I
 	}
 
 	makeResp(ResultStored)
-	Debugf("Storage request success for key '%s'", msgline.Key)
-	_log.Info("Successful command for storage")
+	dtrace.Logf("Storage request success for key '%s'", msgline.Key)
+	log.Info("Successful command for storage")
 	return nil
 }
 
@@ -416,7 +416,7 @@ func (h *handler) allocSlots(t *MetaItem) error {
 	byteLen := t.byteLen
 	c := h.cfg.SlotCapMax
 	for {
-		Debugf("Check slab-groups for capacity: %d; Left-bytes: %d", c, byteLen)
+		dtrace.Logf("Check slab-groups for capacity: %d; Left-bytes: %d", c, byteLen)
 
 		if byteLen >= c || c == h.cfg.SlotCapMin {
 			rest := byteLen % c
@@ -463,21 +463,21 @@ func (h *handler) findSlots(slotCap, cnt int, t *MetaItem) error {
 
 
 func (h *handler) handleRetrieval(msgline *MsgLine, rw *bufio.ReadWriter, entry *ItemsEntry) error {
-	_log := log.WithFields(logrus.Fields{
+	log := logger.WithFields(logrus.Fields{
 		"cmd": msgline.Cmd,
 		"itemKey": msgline.Key,
 	})
 
 	endResp := func(er error) {
 		if _, e := rw.Write(ResultEnd); e != nil {
-			_log.Errorf("write buffer error: %v", e.Error())
+			log.Errorf("write buffer error: %v", e.Error())
 		}
 		if e := rw.Flush(); e != nil {
-			_log.Errorf("flush buffer error: %v", e.Error())
+			log.Errorf("flush buffer error: %v", e.Error())
 		}
 
 		if er == nil {
-			_log.Info("Successful command for retrieval")
+			log.Info("Successful command for retrieval")
 		}
 	}
 
