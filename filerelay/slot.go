@@ -10,9 +10,9 @@ import (
 
 const _ReserveLimit = time.Second * 2
 
-func timePassed(afteThan time.Time, limits time.Duration) bool {
+func timePassed(afterThan time.Time, limits time.Duration) bool {
 	now := time.Now()
-	diff := now.Sub(afteThan)
+	diff := now.Sub(afterThan)
 	return diff > limits
 }
 
@@ -67,6 +67,10 @@ func (s *Slot) CheckClear() bool {
 	return ok
 }
 
+func (s *Slot) Reserve() {
+	s.reservedAt = time.Now()
+}
+
 func (s *Slot) Key() string {
 	return s.key
 }
@@ -82,7 +86,7 @@ func (s *Slot) SetInfoWithItem(t *MetaItem) {
 
 func (s *Slot) ReadAndSet(key string, r io.Reader, byteLen int) (n int, err error) {
 	if s.Occupied() {
-		errInfo := fmt.Sprintf("slot is occupied by %s[%d]; tried by: %s", s.key, s.capacity, key)
+		errInfo := fmt.Sprintf("slot is occupied by key: %s; tried by: %s", s.key, key)
 		return 0, errors.New(errInfo)
 	}
 	if l := len(key); l == 0 || l > KeyMax {

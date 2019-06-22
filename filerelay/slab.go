@@ -50,6 +50,7 @@ func (s *Slab) FindAvailableSlot() *Slot {
 	elem := s.slots.Front()
 	slot := elem.Value.(*Slot)
 	if slot.CheckClear() {
+		slot.Reserve() //reserve slot for avoiding found by others
 		s.slots.MoveToBack(elem)
 		return slot
 	}
@@ -65,7 +66,9 @@ func (s *Slab) FindAvailableSlot() *Slot {
 		elem = s.tryClearFromLast(n)
 		if elem != nil {
 			s.slots.MoveToBack(elem)
-			return elem.Value.(*Slot)
+			slot = elem.Value.(*Slot)
+			slot.Reserve() //reserve slot for avoiding found by others
+			return slot
 		}
 		s.checkTime = time.Now().Unix()
 	}

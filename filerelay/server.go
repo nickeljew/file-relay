@@ -3,7 +3,6 @@ package filerelay
 import (
 	"bufio"
 	"fmt"
-	"math"
 	"net"
 	"regexp"
 	"strconv"
@@ -41,6 +40,12 @@ const (
 	SlotMinExpriration = 60
 	SlabCheckInterval = 10
 )
+
+var _StoreCmds = map[string]bool{
+	"set": true,
+	"add": true,
+	"replace": true,
+}
 
 
 type MemConfig struct {
@@ -116,10 +121,9 @@ func (c *MemConfig) MaxStorageSize() int {
 type Server struct {
 	max int
 	handlers []*handler
-	waitlist []net.Conn
+	waitlist []*ServConn
 	hdrNotif chan int
 	quit chan byte
-	connCount uint64
 
 	memCfg MemConfig
 	entry *ItemsEntry
@@ -129,15 +133,17 @@ type Server struct {
 }
 
 //
-type conn struct {
+type ServConn struct {
 	nc net.Conn
 	rw *bufio.ReadWriter
+	index uint64
 }
 
-func makeConn(nc net.Conn) *conn {
-	return &conn{
+func MakeServConn(nc net.Conn, index uint64) *ServConn {
+	return &ServConn{
 		nc: nc,
 		rw: bufio.NewReadWriter(bufio.NewReader(nc), bufio.NewWriter(nc)),
+		index: index,
 	}
 }
 
@@ -145,7 +151,7 @@ func makeConn(nc net.Conn) *conn {
 func NewServer(c *MemConfig) *Server {
 	c.maxStorageSize = c.MaxStorageSize()
 	c.totalCapacity = 0
-	Debugf("## Start server with config: %v", c)
+	Debugf("## Start server with config: %+v", c)
 	return &Server{
 		max: c.MaxRoutines,
 		handlers: make([]*handler, 0, c.MaxRoutines),
@@ -168,11 +174,11 @@ func (s *Server) Start() {
 				h := s.handlers[i]
 				s.Lock()
 				if !h.running {
-					c := s.waitlist[0]
+					sc := s.waitlist[0]
 					s.waitlist = s.waitlist[1:]
-					Debug("* Pop from waitlist for handler: ", i)
-					if e := h.process(makeConn(c), s.entry); e != nil {
-						log.Error("failed to process connection: ", e.Error())
+					Debug("* Pop from wait-list for handler: ", i)
+					if e := h.process(sc, s.entry); e != nil {
+						log.Errorf("failed to process connection: %v", e.Error())
 					}
 				}
 				s.Unlock()
@@ -227,26 +233,21 @@ func (s *Server) clearSlabs() {
 
 
 //
-func (s *Server) Handle(nc net.Conn) {
-	if err := s.handleConn(nc); err != nil {
-		log.Error("error in handling connection: ", err.Error())
+func (s *Server) Handle(sc *ServConn) {
+	if err := s.handleConn(sc); err != nil {
+		log.Errorf("error in handling connection: %v", err.Error())
 	}
-	if err := nc.Close(); err != nil {
+	if err := sc.nc.Close(); err != nil {
 		log.Error("error in closing connection")
 	}
 }
 
 //
-func (s *Server) handleConn(nc net.Conn) error {
+func (s *Server) handleConn(sc *ServConn) error {
 	s.Lock()
 
 	cnt := len(s.handlers)
-
-	if s.connCount == math.MaxUint64 {
-		s.connCount = 0
-	}
-	s.connCount++
-	Debug("* Running handlers: ", cnt, s.connCount)
+	Debug("* Running handlers: ", cnt, sc.index)
 
 	var hdr *handler
 
@@ -266,14 +267,14 @@ func (s *Server) handleConn(nc net.Conn) error {
 
 	if hdr == nil {
 		Debug("* Put into wait-list")
-		s.waitlist = append(s.waitlist, nc)
+		s.waitlist = append(s.waitlist, sc)
 
 		s.Unlock()
 		return nil
 	}
 
 	s.Unlock()
-	return hdr.process(makeConn(nc), s.entry)
+	return hdr.process(sc, s.entry)
 }
 
 
@@ -301,7 +302,7 @@ func newHandler(idx int, notif chan int, c *MemConfig, groups map[int]*SlabGroup
 	}
 }
 
-func (h *handler) process(cn *conn, entry *ItemsEntry) error {
+func (h *handler) process(sc *ServConn, entry *ItemsEntry) error {
 	//Debug("Nothing here in handler...")
 
 	h.running = true
@@ -313,7 +314,7 @@ func (h *handler) process(cn *conn, entry *ItemsEntry) error {
 	}
 	defer fulfill()
 
-	line, e := cn.rw.ReadSlice('\n')
+	line, e := sc.rw.ReadSlice('\n')
 	if e != nil {
 		return e
 	}
@@ -322,21 +323,19 @@ func (h *handler) process(cn *conn, entry *ItemsEntry) error {
 	msgline.parseLine(line)
 	Debugf(" - Recv: %T %v\n - - -", msgline, msgline)
 
-	var storeCmds = map[string]bool{
-		"set": true,
-		"add": true,
-		"replace": true,
-	}
-	if storeCmds[msgline.Cmd] {
-		return h.handleStorage(msgline, cn.rw, entry)
-	} else if msgline.Cmd == "get" || msgline.Cmd == "gets" {
-		return h.handleRetrieval(msgline, cn.rw, entry)
-	}
-
-	log.WithFields(logrus.Fields{
+	_log := log.WithFields(logrus.Fields{
 		"cmd": msgline.Cmd,
 		"itemKey": msgline.Key,
-	}).Warn("Unsupported command")
+	})
+	_log.Info("Incoming command")
+
+	if _StoreCmds[msgline.Cmd] {
+		return h.handleStorage(msgline, sc.rw, entry)
+	} else if msgline.Cmd == "get" || msgline.Cmd == "gets" {
+		return h.handleRetrieval(msgline, sc.rw, entry)
+	}
+
+	_log.Warn("Unsupported command")
 	return nil
 }
 
@@ -356,14 +355,15 @@ func (h *handler) handleStorage(msgline *MsgLine, rw *bufio.ReadWriter, entry *I
 
 	makeResp := func(cmd []byte) {
 		if _, e := rw.Write(cmd); e != nil {
-			_log.Error(e.Error())
+			_log.Errorf("Write buffer error: %v", e.Error())
 		}
 		if e := rw.Flush(); e != nil {
-			_log.Error(e.Error())
+			_log.Errorf("Flush buffer error: %v", e.Error())
 		}
 	}
-	failResp := func() {
+	failResp := func(e error) {
 		makeResp(ResultNotStored)
+		Debugf("Storage request failure for key '%s': %v", msgline.Key, e.Error())
 	}
 
 	item := NewMetaItem(msgline.Key, msgline.Flags, exp, msgline.ValueLen)
@@ -377,15 +377,15 @@ func (h *handler) handleStorage(msgline *MsgLine, rw *bufio.ReadWriter, entry *I
 		err = entry.Replace(item)
 	}
 	if err != nil {
-		failResp()
+		failResp(err)
 		return err
 	}
 
 	if e := h.allocSlots(item); e != nil {
-		_log.Error(e.Error())
+		_log.Errorf("Allocate slots error: %v", e.Error())
 		_ = entry.Remove(item.key)
 
-		failResp()
+		failResp(e)
 		return e
 	}
 
@@ -395,10 +395,10 @@ func (h *handler) handleStorage(msgline *MsgLine, rw *bufio.ReadWriter, entry *I
 
 		s.SetInfoWithItem(item)
 		if n, e := s.ReadAndSet(msgline.Key, rw, bytesLeft); e != nil {
-			_log.Error(e.Error())
+			_log.Errorf("Error when read buffer and set into slot: %v", e.Error())
 			Debug(" - Read data failure: ", e.Error())
 
-			failResp()
+			failResp(e)
 			return e
 		} else {
 			bytesLeft -= n
@@ -406,6 +406,8 @@ func (h *handler) handleStorage(msgline *MsgLine, rw *bufio.ReadWriter, entry *I
 	}
 
 	makeResp(ResultStored)
+	Debugf("Storage request success for key '%s'", msgline.Key)
+	_log.Info("Successful command for storage")
 	return nil
 }
 
@@ -466,12 +468,16 @@ func (h *handler) handleRetrieval(msgline *MsgLine, rw *bufio.ReadWriter, entry 
 		"itemKey": msgline.Key,
 	})
 
-	endResp := func() {
+	endResp := func(er error) {
 		if _, e := rw.Write(ResultEnd); e != nil {
-			_log.Error(e.Error())
+			_log.Errorf("write buffer error: %v", e.Error())
 		}
 		if e := rw.Flush(); e != nil {
-			_log.Error(e.Error())
+			_log.Errorf("flush buffer error: %v", e.Error())
+		}
+
+		if er == nil {
+			_log.Info("Successful command for retrieval")
 		}
 	}
 
@@ -491,7 +497,7 @@ func (h *handler) handleRetrieval(msgline *MsgLine, rw *bufio.ReadWriter, entry 
 		}
 
 		if e := h.writeRespFirstLine(item, rw, byteLen); e != nil {
-			endResp()
+			endResp(e)
 			return e
 		}
 
@@ -499,18 +505,18 @@ func (h *handler) handleRetrieval(msgline *MsgLine, rw *bufio.ReadWriter, entry 
 			for _, s := range item.slots {
 				bytes := s.data[:s.used]
 				if _, e := rw.Write(bytes); e != nil {
-					endResp()
+					endResp(e)
 					return e
 				}
 			}
 			if _, e := rw.Write([]byte("\r\n")); e != nil {
-				endResp()
+				endResp(e)
 				return e
 			}
 		}
 	}
 
-	endResp()
+	endResp(nil)
 	return nil
 }
 

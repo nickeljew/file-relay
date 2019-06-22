@@ -1,6 +1,7 @@
 package filerelay
 
 import (
+	"math"
 	"net"
 	"os"
 
@@ -58,23 +59,25 @@ func InitClientConfig(host string) (*Config, error) {
 func Start(rawCfg string) int {
 	cfg, err := ParseConfig(rawCfg)
 	if err != nil {
-		log.Error("Error parsing config: ", err.Error())
+		log.Errorf("Error parsing config: %v", err.Error())
 		return 1
 	}
-	Debugf("## Init with config: %v", cfg)
+	Debugf("## Init with config: %+v", cfg)
 
 	lis, err2 := net.Listen(cfg.NetworkType, cfg.Addr())
 	if err2 != nil {
-		log.Error("Error listening: ", err2.Error())
+		log.Errorf("Error listening: %v", err2.Error())
 		return 1
 	}
-	log.Info("Server is listening at: ", cfg.Addr())
+	log.Infof("Server is listening at: %v", cfg.Addr())
 	defer lis.Close()
 
 	server := NewServer(cfg)
 	
 	go server.Start()
 	defer server.Stop()
+
+	var cIndex uint64 = 0
 
 	for {
         // Listen for an incoming connection.
@@ -85,7 +88,11 @@ func Start(rawCfg string) int {
         }
 		// Handle connections in a new goroutine.
 		log.Info("# New incoming connection")
-        go server.Handle(conn)
+		if cIndex == math.MaxUint64 {
+			cIndex = 0
+		}
+        cIndex++
+        go server.Handle( MakeServConn(conn, cIndex) )
     }
 
 	//return 0

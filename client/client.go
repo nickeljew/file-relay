@@ -42,6 +42,8 @@ var (
 )
 
 
+var trialKeyMap = make(map[string]bool)
+
 
 //
 func main() {
@@ -97,7 +99,7 @@ func doConcurrentSet(cnt int) {
 
 func doSetInIndex(idx int, fin chan int) {
 	fmt.Println("Doing at index: ", idx)
-	if err := trySet(""); err != nil {
+	if err := trySet("", idx); err != nil {
 		fmt.Printf("Error in %d: %s\n", idx, err.Error())
 	} else {
 		fmt.Printf("Finish %d\n", idx)
@@ -108,7 +110,7 @@ func doSetInIndex(idx int, fin chan int) {
 func doSetNGet(key string, onlyGet bool) {
 	if !onlyGet {
 		fmt.Println("# Doing set with key: ", key)
-		if e := trySet(key); e != nil {
+		if e := trySet(key, 0); e != nil {
 			fmt.Printf("Error: %s\n", e.Error())
 		} else {
 			fmt.Println("Finish")
@@ -121,8 +123,21 @@ func doSetNGet(key string, onlyGet bool) {
 	}
 }
 
+func createKey() string {
+	var key string
+	for {
+		key = "test123" + filerelay.RandomStr(10, 50)
+		fmt.Println("Trying created key: ", key)
+		if !trialKeyMap[key] {
+			trialKeyMap[key] = true
+			break
+		}
+	}
+	return key
+}
+
 //
-func trySet(key string) error {
+func trySet(key string, tryIndex int) error {
 	client, err := setupClient()
 	if err != nil {
 		fmt.Println(err.Error())
@@ -133,7 +148,7 @@ func trySet(key string) error {
 	reqValue, err := ioutil.ReadFile("./test.txt")
 	key = strings.Trim(key, " \f\n\r\t\v")
 	if key == "" {
-		key = "test123" + filerelay.RandomStr(10, 50)
+		key = createKey()
 	}
 
 	msgline := &filerelay.MsgLine{
@@ -146,7 +161,7 @@ func trySet(key string) error {
 
 	toSend := fmt.Sprintf("%s %s %d %d %d\r\n",
 		msgline.Cmd, msgline.Key, msgline.Flags, msgline.Expiration, msgline.ValueLen)
-	fmt.Printf("Sending:\n>%s", toSend)
+	fmt.Printf("Sending[%d]:\n>%s", tryIndex, toSend)
 	//if _, err := fmt.Fprintf(client.rw, toSend); err != nil {
 	//	return err
 	//}
@@ -168,7 +183,7 @@ func trySet(key string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("Response from server:", strings.Trim(string(line)," \r\n"))
+	fmt.Printf("Response from server[%d]: %s\n", tryIndex, strings.Trim(string(line)," \r\n"))
 
 	switch {
 	case bytes.Equal(line, filerelay.ResultStored):
