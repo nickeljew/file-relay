@@ -3,18 +3,20 @@
 
 <img width="400" src="dtrace-sample.png">
 
-A simple Go debugging utility with debug groups filtering.
+A simple Go debugging utility support filtering by namespaces.
 Inspired by Node.js [debug](https://github.com/visionmedia/debug) library
 
 
 ## Enabling
 - run go program with "-tags debug"
-- set env for filtering groups of debug logs
+- set env for filtering namespaces for debug logs
 ```
 $ DTRACE=sample,sample:* go run -tags debug sample.go
 ```
 
 ## Using in development
+
+### Sample code
 ```go
 package main
 
@@ -61,3 +63,24 @@ func handleMem(sz int) {
 	memTrace.Log(" data stored")
 }
 ```
+
+
+### Using namespace to group debug logs
+```go
+var (
+    dtrace = NewDTrace("main")
+    ns1aTrace = NewDTrace("ns1:a")
+    ns2aTrace = NewDTrace("ns2:a")
+    ns2bTrace = NewDTrace("ns2:b")
+)
+```
+Using colon to set namespaces grouped by major names, such as "ns1" and "ns2" in example above
+
+### Filtering namespaces in ENV
+```
+DTRACE=main,ns1:a,ns2:*,-ns2:b
+```
+
+- Using comma as delimiter for multiple namespaces
+- Filtering with wildcard schema (e.g. ns1:*) or explicit schema (e.g. ns1:a)
+- Specifying namespaces for exclusion (e.g. -ns2:b)
