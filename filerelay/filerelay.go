@@ -20,6 +20,7 @@ var (
 	})
 
 	dtrace = NewDTrace("filerelay")
+	//servTrace = NewDTrace("filerelay:serv")
 	metaTrace = NewDTrace("filerelay:meta")
 	memTrace = NewDTrace("filerelay:mem")
 )

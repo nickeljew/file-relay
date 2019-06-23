@@ -84,8 +84,8 @@ func NewMemConfig() *MemConfig {
 		SlotCapMin: ValFrom(sz16B, sz64B).(int),
 		SlotCapMax: ValFrom(szKB, sz4KB).(int),
 	
-		SlotsInSlab: ValFrom(8, 100).(int),
-		SlabsInGroup: ValFrom(1, 100).(int),
+		SlotsInSlab: ValFrom(10, 100).(int),
+		SlabsInGroup: ValFrom(10, 100).(int),
 
 		MaxStorage: "200MB",
 	}
@@ -448,8 +448,18 @@ func (h *handler) allocSlots(t *MetaItem) error {
 
 
 func (h *handler) findSlots(slotCap, cnt int, t *MetaItem) error {
+	dtrace.Logf("Finding %d slots for key[%s] with cap[%d]", cnt, t.key, slotCap)
 	group := h.groups[slotCap]
-	if slots, e := group.FindAvailableSlots(cnt, h.cfg.totalCapacity); e == nil {
+	if slots, e := group.FindAvailableSlots(t.key, cnt, h.cfg.totalCapacity); e == nil {
+		if Dev {
+			arr := make([]string, 0, len(slots))
+			for _, s := range slots {
+				p := fmt.Sprintf("%p", s)
+				arr = append(arr, p)
+			}
+			dtrace.Logf(" - Got slots for key[%s] with cap[%d]: %v", t.key, slotCap, arr)
+		}
+
 		if len(t.slots) > 0 {
 			t.slots = append(t.slots, slots...)
 		} else {

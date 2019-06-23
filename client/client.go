@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nickeljew/file-relay/filerelay"
@@ -42,7 +43,14 @@ var (
 )
 
 
-var trialKeyMap = make(map[string]bool)
+
+type TrialKeyMap struct {
+	keys map[string]bool
+	sync.Mutex
+}
+var trialKeyMap = TrialKeyMap{
+	keys: make(map[string]bool),
+}
 
 
 //
@@ -128,10 +136,13 @@ func createKey() string {
 	for {
 		key = "test123" + filerelay.RandomStr(10, 50)
 		fmt.Println("Trying created key: ", key)
-		if !trialKeyMap[key] {
-			trialKeyMap[key] = true
+		trialKeyMap.Lock()
+		if !trialKeyMap.keys[key] {
+			trialKeyMap.keys[key] = true
+			trialKeyMap.Unlock()
 			break
 		}
+		trialKeyMap.Unlock()
 	}
 	return key
 }

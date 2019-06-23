@@ -137,12 +137,12 @@ func (g *SlabGroup) Capacity() int {
 	return g.totalCap
 }
 
-func (g *SlabGroup) FindAvailableSlots(need, currentTotalCap int) (s []*Slot, e error) {
+func (g *SlabGroup) FindAvailableSlots(key string, need, currentTotalCap int) ([]*Slot, error) {
 	if need > g.SlotSum() {
 		return nil, errors.New("too many slots to request")
 	}
 
-	s = make([]*Slot, 0, need)
+	slots := make([]*Slot, 0, need)
 	result := make(SlabCh)
 	conc, cnt := slabsCheckConc, need
 	SlabSum := g.slabs.Len()
@@ -153,10 +153,12 @@ func (g *SlabGroup) FindAvailableSlots(need, currentTotalCap int) (s []*Slot, e 
 	if sl := g.slabs.Len(); conc > sl {
 		conc = sl
 	}
-	memTrace.Logf("-- Find for Cap: %d - Need-slots: %d, Total-slabs: %d, Total-slots: %d; conc: %d", g.slotCap, need, slabsLeft, slotsLeft, conc)
+	memTrace.Logf("-- <%s> Find for Cap: %d - Need-slots: %d, Total-slabs: %d, Total-slots: %d; conc: %d", key, g.slotCap, need, slabsLeft, slotsLeft, conc)
 
 	ForEnd:
 	for {
+		//memTrace.Logf("-- <%s> New-round-Loop for finding slot: %d - Slabs-left: %d, Slots-left: %d, Need-slots-left: %d", key, g.slotCap, slabsLeft, slotsLeft, cnt)
+
 		if cnt == 0 || slotsLeft == 0 {
 			break
 		}
@@ -164,11 +166,20 @@ func (g *SlabGroup) FindAvailableSlots(need, currentTotalCap int) (s []*Slot, e 
 			slabsLeft = SlabSum
 		}
 
-		slabsLeft = g.doCheck(conc, slabsLeft, result)
-		//memTrace.Logf("-- Loop for finding slot: %d - Slabs-left: %d, Slots-left: %d, Need-slots-left: %d", g.slotCap, slabsLeft, slotsLeft, cnt)
+		slabsLeft = g.doCheck(key, conc, slabsLeft, result)
+		//memTrace.Logf("-- <%s> In-loop for finding slot: %d - Slabs-left: %d, Slots-left: %d, Need-slots-left: %d", key, g.slotCap, slabsLeft, slotsLeft, cnt)
 
 		select {
 		case slab := <- result:
+			//memTrace.Logf("-- <%s> In-select for finding slot: %d - Slabs-left: %d, Slots-left: %d, Need-slots-left: %d", key, g.slotCap, slabsLeft, slotsLeft, cnt)
+			got := len(slots)
+			if got >= need {
+				if got > need {
+					slots = slots[0:need]
+				}
+				break ForEnd
+			}
+
 			if slab == nil {
 				panic("No slab found")
 			}
@@ -177,31 +188,32 @@ func (g *SlabGroup) FindAvailableSlots(need, currentTotalCap int) (s []*Slot, e 
 			slot := slab.FindAvailableSlot()
 			slotsLeft--
 			if slot != nil {
-				s = append(s, slot)
+				slots = append(slots, slot)
 				cnt--
+				got++
 			}
 
-			got := len(s)
-			//memTrace.Logf("-- Next for Cap: %d - Need-slots-left: %d, Got-slots: %d", g.slotCap, cnt, got)
-			if got >= need {
-				//break //Fuck there! can't break the loop inside select
+			//memTrace.Logf("-- <%s> Next for Cap: %d - Need-slots-left: %d, Got-slots: %d", key, g.slotCap, cnt, got)
+			if got == need {
 				break ForEnd
 			}
 		}
 	}
 
 	if cnt > 0 {
-		e = errors.New("no enough slots")
-
 		if currentTotalCap < g.maxStorageSize {
 			//
 		}
+
+		return nil, errors.New("no enough slots")
 	}
-	memTrace.Logf(" - finished for Cap: %d - got: %d, Slots-left: %d (%d)", g.slotCap, len(s), slotsLeft, g.slotSum)
-	return
+
+	memTrace.Logf(" - finished for Cap: %d - got: %d, Slots-left: %d (%d)", g.slotCap, len(slots), slotsLeft, g.slotSum)
+	return slots, nil
 }
 
-func (g *SlabGroup) doCheck(conc, total int, r SlabCh) int {
+func (g *SlabGroup) doCheck(key string, conc, total int, r SlabCh) int {
+	//memTrace.Logf("-- <%s> Check group[%d] with %d slabs; conc: %d, total: %d", key, g.slotCap, g.slabs.Len(), conc, total)
 	left := total
 	for i := 0; i < conc; i++ {
 		go g.getSlabForCheck(r)
@@ -216,7 +228,7 @@ func (g *SlabGroup) getSlabForCheck(r SlabCh) {
 	elem := g.slabs.Front()
 	slab := elem.Value.(*Slab)
 	g.slabs.MoveToBack(elem)
-	r <- slab
 
-	g.Unlock()
+	g.Unlock() //unlock before send it to chan to allow next round to proceed
+	r <- slab
 }
