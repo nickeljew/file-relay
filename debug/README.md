@@ -11,7 +11,7 @@ Inspired by Node.js [debug](https://github.com/visionmedia/debug) library
 - run go program with "-tags debug"
 - set env for filtering groups of debug logs
 ```
-$ DTRACE=sample,sample:* go run -tags debug main.go
+$ DTRACE=sample,sample:* go run -tags debug sample.go
 ```
 
 ## Using in developing
