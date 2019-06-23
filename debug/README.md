@@ -3,7 +3,7 @@
 
 <img width="400" src="dtrace-sample.png">
 
-A simple Go debugging utility support filtering by namespaces.
+A simple Go debugging utility with filtering by namespaces.
 Inspired by Node.js [debug](https://github.com/visionmedia/debug) library
 
 
