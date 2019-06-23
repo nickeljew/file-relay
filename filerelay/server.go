@@ -176,13 +176,17 @@ func (s *Server) Start() {
 				if !h.running {
 					sc := s.waitlist[0]
 					s.waitlist = s.waitlist[1:]
-					dtrace.Log("* Pop from wait-list for handler: ", i)
+					dtrace.Logf("* Pop conn[%d] from wait-list for handler: %d", sc.index, i)
 					if e := h.process(sc, s.entry); e != nil {
 						logger.Errorf("failed to process connection: %v", e.Error())
 					}
 				}
 				s.Unlock()
 			}
+
+		//TODO: set timer to check wait-list
+		//case
+
 		case <- s.quit:
 			logger.Info("Quit server")
 			s.Lock()
@@ -266,7 +270,7 @@ func (s *Server) handleConn(sc *ServConn) error {
 	}
 
 	if hdr == nil {
-		dtrace.Log("* Put into wait-list")
+		dtrace.Logf("* Put into wait-list: conn[%d]", sc.index)
 		s.waitlist = append(s.waitlist, sc)
 
 		s.Unlock()
@@ -274,6 +278,8 @@ func (s *Server) handleConn(sc *ServConn) error {
 	}
 
 	s.Unlock()
+
+	dtrace.Logf("* Process conn[%d] with handler: %d", sc.index, hdr.index)
 	return hdr.process(sc, s.entry)
 }
 

@@ -90,12 +90,12 @@ func Start(rawCfg string) int {
 			logger.Errorf("Error accepting: %v", err.Error())
             return 1
         }
-		// Handle connections in a new goroutine.
-		logger.Info("# New incoming connection")
 		if cIndex == math.MaxUint64 {
 			cIndex = 0
 		}
         cIndex++
+		// Handle connections in a new goroutine.
+		logger.Infof("# New incoming connection [%d]", cIndex)
         go server.Handle( MakeServConn(conn, cIndex) )
     }
 

@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	slabsCheckConc = 3
+	_SlabsCheckConc = 3
 )
 
 
@@ -139,6 +139,13 @@ func (g *SlabGroup) Capacity() int {
 	return g.totalCap
 }
 
+func (g *SlabGroup) slabCheckConcurrency() int {
+	if g.initSlabCount < 30 {
+		return _SlabsCheckConc
+	}
+	return int( math.Round(float64(g.initSlabCount) / 10 + 0.5) )
+}
+
 func (g *SlabGroup) FindAvailableSlots(key string, need, currentTotalCap int) ([]*Slot, error) {
 	if need > g.SlotSum() {
 		return nil, errors.New("too many slots to request")
@@ -146,7 +153,7 @@ func (g *SlabGroup) FindAvailableSlots(key string, need, currentTotalCap int) ([
 
 	slots := make([]*Slot, 0, need)
 	result := make(SlabCh)
-	conc, cnt := slabsCheckConc, need
+	conc, cnt := g.slabCheckConcurrency(), need
 	SlabSum := g.slabs.Len()
 	slabsLeft, slotsLeft := SlabSum, g.slotSum
 	if conc > need {
