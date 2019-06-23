@@ -1,7 +1,7 @@
 # Simple Debug-Trace Library
 
 
-![](./dtrace-sample.png)
+<img width="400" src="dtrace-sample.png">
 
 A simple Go debugging utility with debug groups filtering.
 Inspired by Node.js [debug](https://github.com/visionmedia/debug) library
