@@ -78,20 +78,23 @@ func (dt *DTrace) setStyle(namespace string) {
 	dt.style = Style{FgColors[c], OpBold}
 }
 
+func (dt *DTrace) formatMultilines(s string) string {
+	prefix := "  " + dt.style.Render(dt.ns) + " "
+	return prefix + strings.Join( strings.Split(s, "\n"), "\n" + prefix)
+}
+
 func (dt *DTrace) Log(a ...interface{}) {
 	if !dt.enabled {
 		return
 	}
-	s := dt.style.Render(dt.ns) + " " + fmt.Sprintln(a...)
-	fmt.Printf(s)
+	fmt.Printf( dt.formatMultilines( fmt.Sprint(a...) ) + "\n" )
 }
 
 func (dt *DTrace) Logf(s string, a ...interface{}) {
 	if !dt.enabled {
 		return
 	}
-	s = dt.style.Render(dt.ns) + " " + s
-	fmt.Printf(s + "\n", a...)
+	fmt.Printf( dt.formatMultilines(s) + "\n", a...)
 }
 
 
