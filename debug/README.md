@@ -14,7 +14,7 @@ Inspired by Node.js [debug](https://github.com/visionmedia/debug) library
 $ DTRACE=sample,sample:* go run -tags debug sample.go
 ```
 
-## Using in developing
+## Using in development
 ```go
 package main
 
