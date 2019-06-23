@@ -93,6 +93,7 @@ func (s *Slab) tryClearFromLast(n int) (el *list.Element) {
 
 type SlabGroup struct {
 	slotCap int
+	initSlabCount int
 	slotSum int
 	checkIntv int
 
@@ -108,6 +109,7 @@ type SlabCh chan *Slab
 func NewSlabGroup(slotCap, slabCount, slotCount, checkIntv, maxSize int) *SlabGroup {
 	group := SlabGroup{
 		slotCap: slotCap,
+		initSlabCount: slabCount,
 		checkIntv: checkIntv,
 		maxStorageSize: maxSize,
 		slabs: list.New(),
@@ -157,8 +159,6 @@ func (g *SlabGroup) FindAvailableSlots(key string, need, currentTotalCap int) ([
 
 	ForEnd:
 	for {
-		//memTrace.Logf("-- <%s> New-round-Loop for finding slot: %d - Slabs-left: %d, Slots-left: %d, Need-slots-left: %d", key, g.slotCap, slabsLeft, slotsLeft, cnt)
-
 		if cnt == 0 || slotsLeft == 0 {
 			break
 		}
@@ -171,7 +171,6 @@ func (g *SlabGroup) FindAvailableSlots(key string, need, currentTotalCap int) ([
 
 		select {
 		case slab := <- result:
-			//memTrace.Logf("-- <%s> In-select for finding slot: %d - Slabs-left: %d, Slots-left: %d, Need-slots-left: %d", key, g.slotCap, slabsLeft, slotsLeft, cnt)
 			got := len(slots)
 			if got >= need {
 				if got > need {

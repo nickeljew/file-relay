@@ -1,4 +1,4 @@
-# Simple Debug-Trace Library
+# Simple Debugging Log Library
 
 
 <img width="400" src="dtrace-sample.png">

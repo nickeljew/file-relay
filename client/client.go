@@ -57,7 +57,7 @@ var trialKeyMap = TrialKeyMap{
 func main() {
 	fmt.Println("File-Relay client *", time.Now())
 
-	doConcurrentSet(10)
+	doConcurrentSet(21)
 	//doSetNGet("test-abc-set-and-get", false)
 	
 	os.Exit(0)
@@ -194,7 +194,7 @@ func trySet(key string, tryIndex int) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Response from server[%d]: %s\n", tryIndex, strings.Trim(string(line)," \r\n"))
+	fmt.Printf("Response from server[%d]<%s>: %s\n", tryIndex, key, strings.Trim(string(line)," \r\n"))
 
 	switch {
 	case bytes.Equal(line, filerelay.ResultStored):
