@@ -225,6 +225,7 @@ func tryGet(key string) error {
 		return err
 	}
 	fmt.Println("Response from server:", strings.Trim(string(line)," \r\n"))
+	//fmt.Println("Response from server:", strings.ReplaceAll(string(line), "\\", "\\\\"))
 
 	ml := &filerelay.MsgLine{}
 	pattern := "VALUE %s %d %d %d\r\n"
@@ -234,7 +235,7 @@ func tryGet(key string) error {
 		dest = dest[:3]
 	}
 	if n, e := fmt.Sscanf(string(line), pattern, dest...); e != nil || n != len(dest) {
-		return fmt.Errorf("memcache: unexpected line in get response: %q", line)
+		return fmt.Errorf("unexpected line in get response: %q", line)
 	}
 
 	if ml.ValueLen == 0 {

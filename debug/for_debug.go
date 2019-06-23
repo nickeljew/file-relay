@@ -4,6 +4,7 @@ package debug
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"regexp"
 	"strings"
@@ -43,6 +44,7 @@ func init() {
 type DTrace struct {
 	ns string
 	enabled bool
+	style Style
 }
 
 func NewDTrace(namespace string) *DTrace {
@@ -61,18 +63,34 @@ func NewDTrace(namespace string) *DTrace {
 			break
 		}
 	}
+
+	dt.setStyle(namespace)
 	return dt
 }
 
+func (dt *DTrace) setStyle(namespace string) {
+	chars := []byte(namespace)
+	var hash byte
+	for _, c := range chars {
+		hash = ((hash << 5) - hash) + c
+	}
+	c := int( math.Abs(float64(hash)) ) % len(FgColors)
+	dt.style = Style{FgColors[c], OpBold}
+}
+
 func (dt *DTrace) Log(a ...interface{}) {
-	fmt.Println(a...)
+	if !dt.enabled {
+		return
+	}
+	s := dt.style.Render(dt.ns) + " " + fmt.Sprintln(a...)
+	fmt.Printf(s)
 }
 
 func (dt *DTrace) Logf(s string, a ...interface{}) {
 	if !dt.enabled {
 		return
 	}
-	s = Style{FgGreen, OpBold}.Render(dt.ns) + " " + s
+	s = dt.style.Render(dt.ns) + " " + s
 	fmt.Printf(s + "\n", a...)
 }
 

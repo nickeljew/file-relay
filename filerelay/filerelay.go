@@ -20,7 +20,8 @@ var (
 	})
 
 	dtrace = NewDTrace("filerelay")
-	mtrace = NewDTrace("filerelay:mem")
+	metaTrace = NewDTrace("filerelay:meta")
+	memTrace = NewDTrace("filerelay:mem")
 )
 
 

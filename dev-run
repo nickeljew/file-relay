@@ -1,0 +1,7 @@
+#!/bin/bash
+
+prg="$1"
+withtags="-tags debug"
+shift
+export DTRACE=main,filerelay,filerelay:*
+go run $withtags $prg $@

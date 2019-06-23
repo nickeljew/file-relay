@@ -152,6 +152,12 @@ const (
 	FgGray Color = 90 // 亮黑（灰）
 )
 
+var FgColors = []Color{
+	FgRed, FgGreen, FgYellow, FgBlue, FgMagenta, FgCyan,
+	//FgLightRed, FgLightGreen, FgLightYellow, FgLightBlue, FgLightMagenta, FgLightCyan,
+	FgLightYellow, FgLightMagenta, FgLightRed, FgLightCyan, FgLightGreen, FgLightBlue,
+}
+
 // Background colors. basic background colors 40 - 47
 const (
 	BgBlack Color = iota + 40

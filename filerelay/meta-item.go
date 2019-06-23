@@ -45,7 +45,7 @@ func (t *MetaItem) ClearSlots() {
 func (t *MetaItem) Expired() bool {
 	now := time.Now()
 	diff := now.Sub(t.setAt)
-	mtrace.Logf(" - check item expiration -> setAt: %v | now: %v | diff: %v", t.setAt, now, diff)
+	metaTrace.Logf(" - check item expiration -> setAt: %v | now: %v | diff: %v", t.setAt, now, diff)
 	return diff > t.duration
 }
 
@@ -230,7 +230,7 @@ func (e *ItemsEntry) ScheduledCheck() {
 
 	steps := e.checkSteps
 	if listLen < steps {
-		mtrace.Log("ItemsEntry len: ", listLen)
+		metaTrace.Log("ItemsEntry len: ", listLen)
 		steps = listLen
 	}
 
@@ -243,7 +243,7 @@ func (e *ItemsEntry) ScheduledCheck() {
 		elem := e.checkpoint.Value.(*linkedlist.Element)
 		if elem != nil {
 			item := elem.Value.(*MetaItem)
-			mtrace.Logf("ItemsEntry check steps: %d; key: %s", steps, item.key)
+			metaTrace.Logf("ItemsEntry check steps: %d; key: %s", steps, item.key)
 
 			if item != nil && item.Expired() {
 				_ = e.lru.Remove(item.key)
@@ -267,13 +267,13 @@ func (e *ItemsEntry) movePoint(key string) {
 	}
 
 	k := e.checkpoint.Key().(string)
-	mtrace.Log("Current checkpoint key: ", k)
+	metaTrace.Log("Current checkpoint key: ", k)
 	if k == key {
 		e.checkpoint = e.checkpoint.Next()
 		if e.checkpoint == nil {
-			mtrace.Log("After removed, checkpoint is nil")
+			metaTrace.Log("After removed, checkpoint is nil")
 		} else {
-			mtrace.Log("After removed, checkpoint key: ", e.checkpoint.Key().(string))
+			metaTrace.Log("After removed, checkpoint key: ", e.checkpoint.Key().(string))
 		}
 	}
 }
