@@ -94,8 +94,8 @@ func NewMemConfig() *MemConfig {
 		SlotCapMin: ValFrom(sz16B, sz64B).(int),
 		SlotCapMax: ValFrom(szKB, sz4KB).(int),
 	
-		SlotsInSlab: ValFrom(10, 100).(int),
-		SlabsInGroup: ValFrom(10, 100).(int),
+		SlotsInSlab: ValFrom(20, 1000).(int),
+		SlabsInGroup: ValFrom(20, 1000).(int),
 
 		MaxStorage: "200MB",
 	}

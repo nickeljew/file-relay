@@ -57,7 +57,7 @@ var trialKeyMap = TrialKeyMap{
 func main() {
 	fmt.Println("File-Relay client *", time.Now())
 
-	doConcurrentSet(21)
+	doConcurrentSet(51)
 	//doSetNGet("test-abc-set-and-get", false)
 	
 	os.Exit(0)
@@ -134,7 +134,7 @@ func doSetNGet(key string, onlyGet bool) {
 func createKey() string {
 	var key string
 	for {
-		key = "test123" + filerelay.RandomStr(10, 50)
+		key = "test123" + filerelay.RandomStr(1000, 9999)
 		fmt.Println("Trying created key: ", key)
 		trialKeyMap.Lock()
 		if !trialKeyMap.keys[key] {
