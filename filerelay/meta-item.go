@@ -198,17 +198,19 @@ func NewItemsEntry(lruSize, checkSteps int) *ItemsEntry {
 
 
 func (e *ItemsEntry) StartCheck() {
-	t := time.NewTicker(time.Second * 60)
-
-	for {
-		select {
-		case <-t.C:
-			e.ScheduledCheck()
-		case <- e.quit:
-			logger.Info("Quit ItemsEntry")
-			return
+	go func() {
+		t := time.NewTicker(time.Second * 60)
+		for {
+			select {
+			case <-t.C:
+				e.ScheduledCheck()
+			case <- e.quit:
+				t.Stop()
+				logger.Info("Quit ItemsEntry")
+				return
+			}
 		}
-	}
+	}()
 }
 
 func (e *ItemsEntry) StopCheck() {

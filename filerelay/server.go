@@ -2,11 +2,14 @@ package filerelay
 
 import (
 	"bufio"
+	linkedlist "container/list"
+	"errors"
 	"fmt"
 	"net"
 	"regexp"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -17,7 +20,6 @@ const (
 	szShift = 2
 )
 const (
-	//for test
 	sz4B int = 4 << (szShift * iota)
 	sz16B
 	sz64B
@@ -36,6 +38,14 @@ const (
 	szGB
 )
 
+type HdrState byte
+const (
+	HdrReady HdrState = iota + 0
+	HdrRunning
+	HdrIdle
+	HdrQuit
+)
+
 const (
 	SlotMinExpriration = 60
 	SlabCheckInterval = 10
@@ -51,7 +61,7 @@ var _StoreCmds = map[string]bool{
 type MemConfig struct {
 	Config `yaml:",inline"`
 
-	LRUSize int `yaml:"lru-size"` //mac count of items in LRU list
+	LRUSize int `yaml:"lru-size"` //mac count of items in LRU-list
 	SkipListCheckStep int `yaml:"skiplist-check-step"`
 	//SkipListCheckIntv `yaml:"skiplist-check-interval"` int //in seconds
 
@@ -117,13 +127,148 @@ func (c *MemConfig) MaxStorageSize() int {
 }
 
 
+
+
+//
+type ServConn struct {
+	nc net.Conn
+	rw *bufio.ReadWriter
+	index uint64
+
+	timer *time.Timer
+	closed bool
+}
+
+func MakeServConn(nc net.Conn, index uint64) *ServConn {
+	return &ServConn{
+		nc: nc,
+		rw: bufio.NewReadWriter(bufio.NewReader(nc), bufio.NewWriter(nc)),
+		index: index,
+		closed: false,
+	}
+}
+
+func (sc *ServConn) Close() {
+	if !sc.closed {
+		sc.closed = true
+		if sc.timer != nil {
+			sc.timer.Stop()
+		}
+		if e := sc.nc.Close(); e != nil {
+			logger.Errorf("error in closing connection at [%d]", sc.index)
+		}
+		logger.Infof("connection closed at [%d] by time-out: %v", sc.index, sc.timer == nil)
+		sc.timer = nil
+	}
+}
+
+func (sc *ServConn) AutoTimeOut() {
+	if sc.timer != nil {
+		return
+	}
+	sc.timer = time.NewTimer(time.Second * 10)
+	go func() {
+		<- sc.timer.C
+		sc.timer = nil
+		sc.Close()
+	}()
+}
+
+
+
+//
+type WaitQueue struct {
+	size int
+	queue *linkedlist.List
+	sync.Mutex
+}
+
+func NewWaitQueue(size int) *WaitQueue {
+	return &WaitQueue{
+		size: size,
+		queue: linkedlist.New(),
+	}
+}
+
+func (w *WaitQueue) Purge() {
+	w.queue.Init()
+}
+
+func (w *WaitQueue) Push(sc *ServConn) {
+	w.Lock()
+	if l := w.queue.Len(); l >= w.size {
+		// drop connection when reaching the limit
+		sc.Close()
+	} else {
+		w.queue.PushFront(sc)
+		sc.AutoTimeOut()
+	}
+	w.Unlock()
+}
+
+func (w *WaitQueue) Pop() (sc *ServConn) {
+	w.Lock()
+	elem := w.queue.Back()
+	sc = nil
+	if elem != nil {
+		sc = w.queue.Remove(elem).(*ServConn)
+	}
+	w.Unlock()
+	return
+}
+
+func (w *WaitQueue) Len() int {
+	return w.queue.Len()
+}
+
+
+//
+type ReadyHandlers struct {
+	queue *linkedlist.List
+	sync.Mutex
+}
+
+func NewReadyHandlers() *ReadyHandlers {
+	return &ReadyHandlers{
+		queue: linkedlist.New(),
+	}
+}
+
+func (r *ReadyHandlers) Purge() {
+	r.queue.Init()
+}
+
+func (r *ReadyHandlers) Push(h *handler) {
+	r.Lock()
+	r.queue.PushBack(h)
+	r.Unlock()
+}
+
+func (r *ReadyHandlers) Pop() (h *handler) {
+	r.Lock()
+	elem := r.queue.Front()
+	h = nil
+	if elem != nil {
+		h = r.queue.Remove(elem).(*handler)
+	}
+	r.Unlock()
+	return
+}
+
+func (r *ReadyHandlers) Len() int {
+	return r.queue.Len()
+}
+
+
+
 //
 type Server struct {
-	max int
+	maxRoutines int
 	handlers []*handler
-	waitlist []*ServConn
-	hdrNotif chan int
-	quit chan byte
+	readyHdrs *ReadyHandlers
+	waitQueue *WaitQueue
+	hdrNotif chan interface{}
+	quit chan bool
 
 	memCfg MemConfig
 	entry *ItemsEntry
@@ -132,31 +277,20 @@ type Server struct {
 	sync.Mutex
 }
 
-//
-type ServConn struct {
-	nc net.Conn
-	rw *bufio.ReadWriter
-	index uint64
-}
-
-func MakeServConn(nc net.Conn, index uint64) *ServConn {
-	return &ServConn{
-		nc: nc,
-		rw: bufio.NewReadWriter(bufio.NewReader(nc), bufio.NewWriter(nc)),
-		index: index,
-	}
-}
-
 
 func NewServer(c *MemConfig) *Server {
 	c.maxStorageSize = c.MaxStorageSize()
 	c.totalCapacity = 0
 	dtrace.Logf("## Start server with config: %+v", c)
+
 	return &Server{
-		max: c.MaxRoutines,
+		maxRoutines: c.MaxRoutines,
 		handlers: make([]*handler, 0, c.MaxRoutines),
-		hdrNotif: make(chan int),
-		quit: make(chan byte),
+		readyHdrs: NewReadyHandlers(),
+		waitQueue: NewWaitQueue(c.MaxRoutines * 10),
+		hdrNotif: make(chan interface{}),
+		quit: make(chan bool),
+
 		memCfg: *c,
 		entry: NewItemsEntry(c.LRUSize, c.SkipListCheckStep),
 		groups: make( map[int]*SlabGroup ),
@@ -166,43 +300,66 @@ func NewServer(c *MemConfig) *Server {
 func (s *Server) Start() {
 	s.initSlabs()
 	s.entry.StartCheck()
-	var i int
-	for {
-		select {
-		case i = <- s.hdrNotif:
-			if i >= 0 && len(s.waitlist) > 0 {
-				h := s.handlers[i]
-				s.Lock()
-				if !h.running {
-					sc := s.waitlist[0]
-					s.waitlist = s.waitlist[1:]
-					dtrace.Logf("* Pop conn[%d] from wait-list for handler: %d", sc.index, i)
-					if e := h.process(sc, s.entry); e != nil {
-						logger.Errorf("failed to process connection: %v", e.Error())
-					}
+
+	go func() {
+		checks := 0
+		timeout := 50 * time.Millisecond
+		for {
+			select {
+			case i := <- s.hdrNotif:
+				if h := i.(*handler); h != nil {
+					h.state = HdrReady
+					s.readyHdrs.Push(h)
 				}
-				s.Unlock()
-			}
 
-		//TODO: set timer to check wait-list
-		//case
+			case <- s.quit:
+				dtrace.Log("quit server")
+				return
 
-		case <- s.quit:
-			logger.Info("Quit server")
-			s.Lock()
-			for _, h := range s.handlers {
-				h.quit <- 0
+			default:
+				var err error
+				for {
+					if s.waitQueue.Len() == 0 {
+						break
+					}
+					e := s.handleNext()
+					if e != nil {
+						if e != err {
+							logger.Warnf("handling next: %v", e.Error())
+							err = e
+						}
+						checks++
+						break
+					}
+
+					err = e
+					checks = 0
+				}
+
+				to := timeout
+				if checks > 100 {
+					to *= 10
+				}
+				time.Sleep(timeout)
 			}
-			s.Unlock()
-			return
-		}
-	}
+		}//for
+	}()
 }
 
 func (s *Server) Stop() {
 	s.entry.StopCheck()
-	s.quit <- 0
+	s.quit <- true
 	s.clearSlabs()
+
+	s.waitQueue.Purge()
+	s.readyHdrs.Purge()
+
+	s.Lock()
+	for _, h := range s.handlers {
+		h.stop()
+	}
+	s.Unlock()
+	logger.Info("Server stop")
 }
 
 //
@@ -238,50 +395,46 @@ func (s *Server) clearSlabs() {
 
 //
 func (s *Server) Handle(sc *ServConn) {
-	if err := s.handleConn(sc); err != nil {
-		logger.Errorf("error in handling connection: %v", err.Error())
-	}
-	if err := sc.nc.Close(); err != nil {
-		logger.Error("error in closing connection")
-	}
+	s.waitQueue.Push(sc)
 }
 
 //
-func (s *Server) handleConn(sc *ServConn) error {
-	s.Lock()
+func (s *Server) handleNext() error {
+	hdr := s.readyHdrs.Pop()
 
-	cnt := len(s.handlers)
-	dtrace.Log("* Running handlers: ", cnt, sc.index)
-
-	var hdr *handler
-
-	for i, h := range s.handlers {
-		if h != nil && !h.running {
-			dtrace.Log("** Using handler: ", i)
-			hdr = h
-			break
+	if hdr == nil {
+		if cnt := len(s.handlers); cnt < s.maxRoutines {
+			dtrace.Logf("* Running handlers: %d", cnt)
+			s.Lock()
+			hdr = newHandler(cnt, s.hdrNotif, &s.memCfg, s.groups)
+			s.handlers = append(s.handlers, hdr)
+			s.Unlock()
 		}
 	}
 
-	if hdr == nil && cnt < s.max {
-		dtrace.Log("* Get new handler: ", cnt)
-		hdr = newHandler(cnt - 1, s.hdrNotif, &s.memCfg, s.groups)
-		s.handlers = append(s.handlers, hdr)
-	}
-
 	if hdr == nil {
-		dtrace.Logf("* Put into wait-list: conn[%d]", sc.index)
-		s.waitlist = append(s.waitlist, sc)
-
-		s.Unlock()
-		return nil
+		return errors.New("all handlers are busy")
 	}
 
-	s.Unlock()
+	sc := s.waitQueue.Pop()
+	if sc == nil {
+		s.readyHdrs.Push(hdr) //no conn to handle then put it back into ready-list
+		return errors.New("no serv-conn in waiting")
+	}
 
 	dtrace.Logf("* Process conn[%d] with handler: %d", sc.index, hdr.index)
-	return hdr.process(sc, s.entry)
+
+	go func(s *Server, h *handler, sc *ServConn) {
+		if e := h.process(sc, s.entry); e != nil {
+			logger.Errorf("error in handling connection[%d] by handler[%d]: %v", sc.index, h.index, e.Error())
+		}
+		sc.Close()
+	}(s, hdr, sc)
+	return nil
 }
+
+
+
 
 
 
@@ -289,34 +442,39 @@ func (s *Server) handleConn(sc *ServConn) error {
 type handler struct {
 	index int
 
-	quit chan byte
-	notif chan int
-	running bool
+	notif chan interface{}
+	state HdrState
 
-	cfg *MemConfig
-	groups map[int]*SlabGroup
+	cfg *MemConfig //only reference
+	groups map[int]*SlabGroup //only reference
 }
 
-func newHandler(idx int, notif chan int, c *MemConfig, groups map[int]*SlabGroup) *handler {
+func newHandler(idx int, notif chan interface{}, c *MemConfig, groups map[int]*SlabGroup) *handler {
 	return &handler{
 		index: idx,
-		quit: make(chan byte),
 		notif: notif,
-		running: false,
+		state: HdrReady,
 		cfg: c,
 		groups: groups,
 	}
 }
 
+func (h *handler) stop() {
+	dtrace.Log("Handler stop at", h.index)
+	h.state = HdrQuit
+}
+
+
 func (h *handler) process(sc *ServConn, entry *ItemsEntry) error {
 	//dtrace.Log("Nothing here in handler...")
 
-	h.running = true
+	h.state = HdrRunning
 
 	//done and notif
 	fulfill := func() {
-		h.running = false
-		h.notif <- h.index
+		h.state = HdrIdle
+		dtrace.Log("handler process completed at index: ", h.index)
+		h.notif <- h
 	}
 	defer fulfill()
 
@@ -335,14 +493,14 @@ func (h *handler) process(sc *ServConn, entry *ItemsEntry) error {
 	})
 	log.Info("Incoming command")
 
-	if _StoreCmds[msgline.Cmd] {
-		return h.handleStorage(msgline, sc.rw, entry)
-	} else if msgline.Cmd == "get" || msgline.Cmd == "gets" {
-		return h.handleRetrieval(msgline, sc.rw, entry)
-	}
+	err := errors.New("unsupported command")
 
-	log.Warn("Unsupported command")
-	return nil
+	if _StoreCmds[msgline.Cmd] {
+		err = h.handleStorage(msgline, sc.rw, entry)
+	} else if msgline.Cmd == "get" || msgline.Cmd == "gets" {
+		err = h.handleRetrieval(msgline, sc.rw, entry)
+	}
+	return err
 }
 
 
@@ -361,15 +519,16 @@ func (h *handler) handleStorage(msgline *MsgLine, rw *bufio.ReadWriter, entry *I
 
 	makeResp := func(cmd []byte) {
 		if _, e := rw.Write(cmd); e != nil {
-			log.Errorf("Write buffer error: %v", e.Error())
+			log.Errorf("Write buffer error for key<%s> at handler[%d]: %v", msgline.Key, h.index, e.Error())
 		}
 		if e := rw.Flush(); e != nil {
-			log.Errorf("Flush buffer error: %v", e.Error())
+			log.Errorf("Flush buffer error for key<%s> at handler[%d]: %v", msgline.Key, h.index, e.Error())
 		}
 	}
-	failResp := func(e error) {
+	failResp := func(e error) error {
 		makeResp(ResultNotStored)
-		dtrace.Logf("Storage request failure for key '%s': %v", msgline.Key, e.Error())
+		dtrace.Logf("Storage request failure for key<%s> at handler[%d]: %v", msgline.Key, h.index, e.Error())
+		return e
 	}
 
 	item := NewMetaItem(msgline.Key, msgline.Flags, exp, msgline.ValueLen)
@@ -383,37 +542,34 @@ func (h *handler) handleStorage(msgline *MsgLine, rw *bufio.ReadWriter, entry *I
 		err = entry.Replace(item)
 	}
 	if err != nil {
-		failResp(err)
-		return err
+		return failResp(err)
 	}
 
 	if e := h.allocSlots(item); e != nil {
-		log.Errorf("Allocate slots error: %v", e.Error())
+		log.Errorf("Allocate slots error for key<%s> at handler[%d]: %v", msgline.Key, h.index, e.Error())
 		_ = entry.Remove(item.key)
 
-		failResp(e)
-		return e
+		return failResp(e)
 	}
 
 	bytesLeft := msgline.ValueLen
 	for i, s := range item.slots {
-		dtrace.Logf(" - Slot[%d]: %d, byte-left: %d", s.capacity, i, bytesLeft)
+		dtrace.Logf(" - For key<%s> at handler[%d] # slot|%d|: %d, byte-left: %d", msgline.Key, h.index, s.capacity, i, bytesLeft)
 
 		s.SetInfoWithItem(item)
 		if n, e := s.ReadAndSet(msgline.Key, rw, bytesLeft); e != nil {
-			log.Errorf("Error when read buffer and set into slot: %v", e.Error())
-			dtrace.Log(" - Read data failure: ", e.Error())
+			log.Errorf("Error when read buffer and set into slot for key<%s> at handler[%d]: %v", msgline.Key, h.index, e.Error())
+			dtrace.Logf(" - For key<%s> at handler[%d] # Read data failure: %v", msgline.Key, h.index, e.Error())
 
-			failResp(e)
-			return e
+			return failResp(e)
 		} else {
 			bytesLeft -= n
 		}
 	}
 
 	makeResp(ResultStored)
-	dtrace.Logf("Storage request success for key '%s'", msgline.Key)
-	log.Info("Successful command for storage")
+	dtrace.Logf("Storage request success for key<%s> at handler[%d]", msgline.Key, h.index)
+	log.Infof("Successful command for storage for key<%s>", msgline.Key)
 	return nil
 }
 
