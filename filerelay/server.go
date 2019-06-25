@@ -151,14 +151,23 @@ func MakeServConn(nc net.Conn, index uint64) *ServConn {
 func (sc *ServConn) Close() {
 	if !sc.closed {
 		sc.closed = true
+
+		timeout := false
 		if sc.timer != nil {
 			sc.timer.Stop()
+			sc.timer = nil
+			timeout = true
 		}
+
 		if e := sc.nc.Close(); e != nil {
-			logger.Errorf("error in closing connection at [%d]", sc.index)
+			logger.Errorf("error in closing connection at index [%d]", sc.index)
 		}
-		logger.Infof("connection closed at [%d] by time-out: %v", sc.index, sc.timer == nil)
-		sc.timer = nil
+
+		if timeout {
+			logger.Warnf("connection timed out at index [%d]", sc.index)
+		} else {
+			logger.Infof("connection closed at index [%d]", sc.index)
+		}
 	}
 }
 
@@ -519,15 +528,15 @@ func (h *handler) handleStorage(msgline *MsgLine, rw *bufio.ReadWriter, entry *I
 
 	makeResp := func(cmd []byte) {
 		if _, e := rw.Write(cmd); e != nil {
-			log.Errorf("Write buffer error for key<%s> at handler[%d]: %v", msgline.Key, h.index, e.Error())
+			log.Errorf("Write buffer error for key[%s] at handler[%d]: %v", msgline.Key, h.index, e.Error())
 		}
 		if e := rw.Flush(); e != nil {
-			log.Errorf("Flush buffer error for key<%s> at handler[%d]: %v", msgline.Key, h.index, e.Error())
+			log.Errorf("Flush buffer error for key[%s] at handler[%d]: %v", msgline.Key, h.index, e.Error())
 		}
 	}
 	failResp := func(e error) error {
 		makeResp(ResultNotStored)
-		dtrace.Logf("Storage request failure for key<%s> at handler[%d]: %v", msgline.Key, h.index, e.Error())
+		dtrace.Logf("Storage request failure for key[%s] at handler[%d]: %v", msgline.Key, h.index, e.Error())
 		return e
 	}
 
@@ -546,7 +555,7 @@ func (h *handler) handleStorage(msgline *MsgLine, rw *bufio.ReadWriter, entry *I
 	}
 
 	if e := h.allocSlots(item); e != nil {
-		log.Errorf("Allocate slots error for key<%s> at handler[%d]: %v", msgline.Key, h.index, e.Error())
+		log.Errorf("Allocate slots error for key[%s] at handler[%d]: %v", msgline.Key, h.index, e.Error())
 		_ = entry.Remove(item.key)
 
 		return failResp(e)
@@ -554,12 +563,12 @@ func (h *handler) handleStorage(msgline *MsgLine, rw *bufio.ReadWriter, entry *I
 
 	bytesLeft := msgline.ValueLen
 	for i, s := range item.slots {
-		dtrace.Logf(" - For key<%s> at handler[%d] # slot|%d|: %d, byte-left: %d", msgline.Key, h.index, s.capacity, i, bytesLeft)
+		dtrace.Logf(" - For key[%s] at handler[%d] # slot|%d|: %d, byte-left: %d", msgline.Key, h.index, s.capacity, i, bytesLeft)
 
 		s.SetInfoWithItem(item)
 		if n, e := s.ReadAndSet(msgline.Key, rw, bytesLeft); e != nil {
-			log.Errorf("Error when read buffer and set into slot for key<%s> at handler[%d]: %v", msgline.Key, h.index, e.Error())
-			dtrace.Logf(" - For key<%s> at handler[%d] # Read data failure: %v", msgline.Key, h.index, e.Error())
+			log.Errorf("Error when read buffer and set into slot for key[%s] by handler[%d]: %v", msgline.Key, h.index, e.Error())
+			dtrace.Logf(" - For key[%s] by handler[%d] # Read data failure: %v", msgline.Key, h.index, e.Error())
 
 			return failResp(e)
 		} else {
@@ -568,8 +577,8 @@ func (h *handler) handleStorage(msgline *MsgLine, rw *bufio.ReadWriter, entry *I
 	}
 
 	makeResp(ResultStored)
-	dtrace.Logf("Storage request success for key<%s> at handler[%d]", msgline.Key, h.index)
-	log.Infof("Successful command for storage for key<%s>", msgline.Key)
+	dtrace.Logf("Storage request success for key[%s] at handler[%d]", msgline.Key, h.index)
+	log.Infof("Successful command for storage for key[%s]", msgline.Key)
 	return nil
 }
 

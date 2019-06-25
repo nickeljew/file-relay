@@ -194,7 +194,7 @@ func trySet(key string, tryIndex int) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Response from server[%d]<%s>: %s\n", tryIndex, key, strings.Trim(string(line)," \r\n"))
+	fmt.Printf("Response from server[%d] for key[%s]: %s\n", tryIndex, key, strings.Trim(string(line)," \r\n"))
 
 	switch {
 	case bytes.Equal(line, filerelay.ResultStored):
