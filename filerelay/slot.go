@@ -18,6 +18,7 @@ func timePassed(afterThan time.Time, limits time.Duration) bool {
 
 
 
+//
 type Slot struct {
 	key string
 	capacity int

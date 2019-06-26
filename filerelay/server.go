@@ -92,7 +92,7 @@ func NewMemConfig() *MemConfig {
 		SlabCheckIntv: SlabCheckInterval,
 	
 		SlotCapMin: ValFrom(sz16B, sz64B).(int),
-		SlotCapMax: ValFrom(szKB, sz4KB).(int),
+		SlotCapMax: ValFrom(sz4KB, szMB).(int),
 	
 		SlotsInSlab: ValFrom(20, 100).(int),
 		SlabsInGroup: ValFrom(20, 100).(int),
