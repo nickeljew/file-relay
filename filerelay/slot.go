@@ -10,27 +10,21 @@ import (
 
 const _ReserveLimit = time.Second * 2
 
-func timePassed(afterThan time.Time, limits time.Duration) bool {
-	now := time.Now()
-	diff := now.Sub(afterThan)
-	return diff > limits
-}
-
 
 
 //
 type Slot struct {
 	key string
-	capacity int
+	capacity uint64
 	data []byte
-	used int
+	used uint64
 	setAt time.Time
 	duration time.Duration
 
 	reservedAt time.Time
 }
 
-func NewSlot(capacity int) (s *Slot) {
+func NewSlot(capacity uint64) (s *Slot) {
 	s = &Slot{
 		capacity: capacity,
 		data: make([]byte, capacity, capacity),
@@ -39,7 +33,7 @@ func NewSlot(capacity int) (s *Slot) {
 	return 
 }
 
-func (s *Slot) Cap() int {
+func (s *Slot) Cap() uint64 {
 	return s.capacity
 }
 
@@ -85,7 +79,7 @@ func (s *Slot) SetInfoWithItem(t *MetaItem) {
 	s.duration = t.duration
 }
 
-func (s *Slot) ReadAndSet(key string, r io.Reader, byteLen int) (n int, err error) {
+func (s *Slot) ReadAndSet(key string, r io.Reader, byteLen uint64) (used uint64, err error) {
 	if s.Occupied() {
 		errInfo := fmt.Sprintf("slot is occupied by key: %s; tried by: %s", s.key, key)
 		return 0, errors.New(errInfo)
@@ -100,8 +94,10 @@ func (s *Slot) ReadAndSet(key string, r io.Reader, byteLen int) (n int, err erro
 
 	s.key = key
 	buf := s.data[:byteLen]
-	if n, err = io.ReadFull(r, buf); n > 0 {
-		s.used = n
+	if n, e := io.ReadFull(r, buf); n > 0 {
+		used = uint64(n)
+		s.used = used
+		err = e
 	}
 	return
 }

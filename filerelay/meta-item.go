@@ -18,11 +18,11 @@ type MetaItem struct {
 	flags uint32
 	setAt time.Time
 	duration time.Duration
-	byteLen int
+	byteLen uint64
 	slots []*Slot
 }
 
-func NewMetaItem(key string, flags uint32, expiration int64, byteLen int) (t *MetaItem) {
+func NewMetaItem(key string, flags uint32, expiration int64, byteLen uint64) (t *MetaItem) {
 	t = &MetaItem{
 		key: key,
 		flags: flags,

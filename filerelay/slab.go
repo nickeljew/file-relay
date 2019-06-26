@@ -14,14 +14,14 @@ const (
 
 
 type Slab struct {
-	slotCap int
+	slotCap uint64
 	slots *list.List
 	checkTime int64
 	checkIntv int //in seconds
 	sync.Mutex
 }
 
-func NewSlab(slotCap, slotCount, checkIntv int) *Slab {
+func NewSlab(slotCap uint64, slotCount, checkIntv int) *Slab {
 	if checkIntv < SlabCheckInterval {
 		checkIntv = SlabCheckInterval
 	}
@@ -37,8 +37,12 @@ func NewSlab(slotCap, slotCount, checkIntv int) *Slab {
 	return &slab
 }
 
-func (s *Slab) Capacity() int {
-	return s.slotCap * s.slots.Len()
+func (s *Slab) SlotCount() int {
+	return s.slots.Len()
+}
+
+func (s *Slab) Capacity() uint64 {
+	return s.slotCap * uint64(s.slots.Len())
 }
 
 func (s *Slab) FindAvailableSlot() *Slot {
@@ -92,13 +96,14 @@ func (s *Slab) tryClearFromLast(n int) (el *list.Element) {
 
 
 type SlabGroup struct {
-	slotCap int
+	slotCap uint64
 	initSlabCount int
+	slotNumInSlab int
 	slotSum int
 	checkIntv int
 
-	maxStorageSize int
-	totalCap int
+	maxStorageSize uint64
+	totalCap uint64
 
 	slabs *list.List
 	sync.Mutex
@@ -106,26 +111,28 @@ type SlabGroup struct {
 
 type SlabCh chan *Slab
 
-func NewSlabGroup(slotCap, slabCount, slotCount, checkIntv, maxSize int) *SlabGroup {
+func NewSlabGroup(slotCap uint64, slabCount, slotCount, checkIntv int, maxSize uint64) *SlabGroup {
 	group := SlabGroup{
 		slotCap: slotCap,
 		initSlabCount: slabCount,
+		slotNumInSlab: slotCount,
 		checkIntv: checkIntv,
 		maxStorageSize: maxSize,
 		slabs: list.New(),
 	}
 
-	_ = group.AddSlabs(slabCount, slotCount)
+	_ = group.AddSlabs(slabCount)
 
 	return &group
 }
 
-func (g *SlabGroup) AddSlabs(slabCount, slotCount int) (cap int) {
+func (g *SlabGroup) AddSlabs(slabCount int) (cap uint64) {
+	cap = 0
 	for i := 0; i < slabCount; i++ {
-		s := NewSlab(g.slotCap, slotCount, g.checkIntv)
-		g.slotSum += slotCount
+		s := NewSlab(g.slotCap, g.slotNumInSlab, g.checkIntv)
+		g.slotSum += s.SlotCount()
 		cap += s.Capacity()
-		g.slabs.PushBack(s)
+		g.slabs.PushFront(s)
 	}
 	g.totalCap += cap
 	return
@@ -135,87 +142,119 @@ func (g *SlabGroup) SlotSum() int {
 	return g.slotSum
 }
 
-func (g *SlabGroup) Capacity() int {
+func (g *SlabGroup) Capacity() uint64 {
 	return g.totalCap
 }
 
-func (g *SlabGroup) slabCheckConcurrency() int {
-	if g.initSlabCount < 30 {
+func (g *SlabGroup) slabCheckConcurrency(slabCount int) int {
+	if slabCount < 30 {
 		return _SlabsCheckConc
 	}
-	return int( math.Round(float64(g.initSlabCount) / 10 + 0.5) )
+	return int( math.Round(float64(slabCount) / 10 + 0.5) )
 }
 
-func (g *SlabGroup) FindAvailableSlots(key string, need, currentTotalCap int) ([]*Slot, error) {
+func (g *SlabGroup) FindAvailableSlots(key string, need int, currentTotalCap uint64) ([]*Slot, uint64, error) {
 	if need > g.SlotSum() {
-		return nil, errors.New("too many slots to request")
+		return nil, 0, errors.New("too many slots to request")
 	}
 
 	slots := make([]*Slot, 0, need)
 	result := make(SlabCh)
-	conc, cnt := g.slabCheckConcurrency(), need
-	SlabSum := g.slabs.Len()
-	slabsLeft, slotsLeft := SlabSum, g.slotSum
-	if conc > need {
-		conc = need
-	}
-	if sl := g.slabs.Len(); conc > sl {
-		conc = sl
-	}
-	memTrace.Logf("-- <%s> Find for Cap: %d - Need-slots: %d, Total-slabs: %d, Total-slots: %d; conc: %d", key, g.slotCap, need, slabsLeft, slotsLeft, conc)
+	cnt := need
 
-	ForEnd:
-	for {
-		if cnt == 0 || slotsLeft == 0 {
-			break
+	var slabsLeft, slotsLeft int
+
+	startCheck := func() {
+		slabSum := g.slabs.Len()
+		conc := g.slabCheckConcurrency(slabSum)
+		slabsLeft, slotsLeft = slabSum, g.slotSum
+		if conc > cnt {
+			conc = cnt
 		}
-		if slabsLeft == 0 {
-			slabsLeft = SlabSum
+		if sl := g.slabs.Len(); conc > sl {
+			conc = sl
 		}
+		memTrace.Logf("-- <%s> Find for Cap: %d - Need-slots: %d, Total-slabs: %d, Total-slots: %d; conc: %d", key, g.slotCap, cnt, slabsLeft, slotsLeft, conc)
 
-		slabsLeft = g.doCheck(key, conc, slabsLeft, result)
-		//memTrace.Logf("-- <%s> In-loop for finding slot: %d - Slabs-left: %d, Slots-left: %d, Need-slots-left: %d", key, g.slotCap, slabsLeft, slotsLeft, cnt)
+		ForEnd:
+		for {
+			if cnt == 0 || slotsLeft == 0 {
+				break
+			}
+			if slabsLeft == 0 {
+				slabsLeft = slabSum
+			}
 
-		select {
-		case slab := <- result:
-			got := len(slots)
-			if got >= need {
-				if got > need {
-					slots = slots[0:need]
+			slabsLeft = g.doCheck(key, conc, slabsLeft, result)
+			//memTrace.Logf("-- <%s> In-loop for finding slot: %d - Slabs-left: %d, Slots-left: %d, Need-slots-left: %d", key, g.slotCap, slabsLeft, slotsLeft, cnt)
+
+			select {
+			case slab := <- result:
+				got := len(slots)
+				if got >= need {
+					if got > need {
+						slots = slots[0:need]
+					}
+					break ForEnd
 				}
-				break ForEnd
-			}
 
-			if slab == nil {
-				panic("No slab found")
-			}
+				if slab == nil {
+					panic("No slab found")
+				}
 
-			conc = 1
-			slot := slab.FindAvailableSlot()
-			slotsLeft--
-			if slot != nil {
-				slots = append(slots, slot)
-				cnt--
-				got++
-			}
+				conc = 1
+				slot := slab.FindAvailableSlot()
+				slotsLeft--
+				if slot != nil {
+					slots = append(slots, slot)
+					cnt--
+					got++
+				}
 
-			//memTrace.Logf("-- <%s> Next for Cap: %d - Need-slots-left: %d, Got-slots: %d", key, g.slotCap, cnt, got)
-			if got == need {
-				break ForEnd
+				//memTrace.Logf("-- <%s> Next for Cap: %d - Need-slots-left: %d, Got-slots: %d", key, g.slotCap, cnt, got)
+				if got == need {
+					break ForEnd
+				}
 			}
 		}
 	}
 
+	startCheck()
+
+	var cap uint64
 	if cnt > 0 {
 		if currentTotalCap < g.maxStorageSize {
-			//
+			g.Lock()
+
+			ext := int( math.Round(float64(g.initSlabCount) / 2) )
+			if ext < cnt {
+				ext = cnt
+			}
+			var extSz uint64
+			for ; ext > 0; ext-- {
+				extSz = uint64(ext) * uint64(g.slotNumInSlab) * g.slotCap
+				if sumCap := currentTotalCap + extSz; sumCap < g.maxStorageSize {
+					break
+				}
+			}
+			memTrace.Logf("mark memory[%d] - total: %d, need: %d; max-limit: %d",
+				g.slotCap, currentTotalCap, extSz, g.maxStorageSize)
+			cap = g.AddSlabs(ext)
+
+			g.Unlock()
+
+			startCheck()
+			if len(slots) < need {
+				return nil, 0, errors.New("no enough slots")
+			}
+		} else {
+			return nil, 0, errors.New("storage full")
 		}
 
-		return nil, errors.New("no enough slots")
 	}
 
 	memTrace.Logf(" - finished for Cap: %d - got: %d, Slots-left: %d (%d)", g.slotCap, len(slots), slotsLeft, g.slotSum)
-	return slots, nil
+	return slots, cap, nil
 }
 
 func (g *SlabGroup) doCheck(key string, conc, total int, r SlabCh) int {

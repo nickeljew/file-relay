@@ -20,7 +20,7 @@ const (
 	szShift = 2
 )
 const (
-	sz4B int = 4 << (szShift * iota)
+	sz4B uint64 = 4 << (szShift * iota)
 	sz16B
 	sz64B
 	sz256B
@@ -68,8 +68,8 @@ type MemConfig struct {
 	MinExpiration int64 `yaml:"min-expiration"` //in seconds
 	SlabCheckIntv int `yaml:"slab-check-interval"` //in seconds
 
-	SlotCapMin int `yaml:"slot-capacity-min"` //in bytes
-	SlotCapMax int  `yaml:"slot-capacity-max"` //in bytes
+	SlotCapMin uint64 `yaml:"slot-capacity-min"` //in bytes
+	SlotCapMax uint64  `yaml:"slot-capacity-max"` //in bytes
 
 	SlotsInSlab int `yaml:"slots-in-slab"`
 	SlabsInGroup int `yaml:"slabs-in-group"`
@@ -77,8 +77,8 @@ type MemConfig struct {
 	MaxStorage string `yaml:"max-storage"` //example: 200MB, 2GB`
 
 	// the following will not read from configuration data/file
-	maxStorageSize int
-	totalCapacity int
+	maxStorageSize uint64
+	totalCapacity uint64
 	sync.Mutex //lock for real-time capacity computing
 }
 
@@ -91,17 +91,17 @@ func NewMemConfig() *MemConfig {
 		MinExpiration: SlotMinExpriration,
 		SlabCheckIntv: SlabCheckInterval,
 	
-		SlotCapMin: ValFrom(sz16B, sz64B).(int),
-		SlotCapMax: ValFrom(sz4KB, szMB).(int),
+		SlotCapMin: ValFrom(sz16B, sz64B).(uint64),
+		SlotCapMax: ValFrom(szKB, szMB).(uint64),
 	
-		SlotsInSlab: ValFrom(20, 100).(int),
+		SlotsInSlab: ValFrom(10, 100).(int),
 		SlabsInGroup: ValFrom(20, 100).(int),
 
 		MaxStorage: "200MB",
 	}
 }
 
-func (c *MemConfig) MaxStorageSize() int {
+func (c *MemConfig) MaxStorageSize() uint64 {
 	defSize := 100 * szMB
 	patn := `^([1-9]\d{0,3})([MG]B)$`
 	reg := regexp.MustCompile(patn)
@@ -115,7 +115,7 @@ func (c *MemConfig) MaxStorageSize() int {
 		return defSize
 	}
 
-	if num, e := strconv.Atoi(string(parts[1])); e == nil {
+	if num, e := strconv.ParseUint(string(parts[1]), 10, 64); e == nil {
 		base := string(parts[2])
 		if base == "MB" && num > 1 {
 			return num * szMB
@@ -124,6 +124,19 @@ func (c *MemConfig) MaxStorageSize() int {
 		}
 	}
 	return defSize
+}
+
+func (c *MemConfig) AddCapToTotal(cap uint64) {
+	c.Lock()
+	c.totalCapacity += cap
+	c.Unlock()
+}
+
+func (c *MemConfig) TotalCapacity() uint64 {
+	c.Lock()
+	total := c.totalCapacity
+	c.Unlock()
+	return total
 }
 
 
@@ -270,6 +283,9 @@ func (r *ReadyHandlers) Len() int {
 
 
 
+type slabGroupMap map[uint64]*SlabGroup
+
+
 //
 type Server struct {
 	maxRoutines int
@@ -281,7 +297,7 @@ type Server struct {
 
 	memCfg MemConfig
 	entry *ItemsEntry
-	groups map[int]*SlabGroup
+	groups slabGroupMap
 
 	sync.Mutex
 }
@@ -302,7 +318,7 @@ func NewServer(c *MemConfig) *Server {
 
 		memCfg: *c,
 		entry: NewItemsEntry(c.LRUSize, c.SkipListCheckStep),
-		groups: make( map[int]*SlabGroup ),
+		groups: make( slabGroupMap ),
 	}
 }
 
@@ -313,6 +329,7 @@ func (s *Server) Start() {
 	go func() {
 		checks := 0
 		timeout := 50 * time.Millisecond
+
 		for {
 			select {
 			case i := <- s.hdrNotif:
@@ -377,7 +394,7 @@ func (s *Server) initSlabs() {
 	for {
 		g := NewSlabGroup(c,
 			s.memCfg.SlabsInGroup, s.memCfg.SlotsInSlab, s.memCfg.SlabCheckIntv, s.memCfg.maxStorageSize)
-		s.memCfg.totalCapacity += g.Capacity()
+		s.memCfg.AddCapToTotal( g.Capacity() )
 		s.groups[c] = g
 		dtrace.Logf("Check group: %d; %d, %v", len(s.groups), c, g)
 
@@ -386,7 +403,7 @@ func (s *Server) initSlabs() {
 			break
 		}
 	}
-	dtrace.Log("Total capacity in initialization: ", s.memCfg.totalCapacity)
+	dtrace.Logf("Total capacity in initialization - storage: %d, runtime: %d", s.memCfg.TotalCapacity(), getMemUsed())
 }
 
 func (s *Server) clearSlabs() {
@@ -455,10 +472,10 @@ type handler struct {
 	state HdrState
 
 	cfg *MemConfig //only reference
-	groups map[int]*SlabGroup //only reference
+	groups slabGroupMap //only reference
 }
 
-func newHandler(idx int, notif chan interface{}, c *MemConfig, groups map[int]*SlabGroup) *handler {
+func newHandler(idx int, notif chan interface{}, c *MemConfig, groups slabGroupMap) *handler {
 	return &handler{
 		index: idx,
 		notif: notif,
@@ -595,7 +612,7 @@ func (h *handler) allocSlots(t *MetaItem) error {
 			rest := byteLen % c
 			cnt := 0
 			if byteLen > rest {
-				cnt = (byteLen - rest) / c
+				cnt = int( (byteLen - rest) / c )
 				byteLen = rest
 			}
 
@@ -620,10 +637,10 @@ func (h *handler) allocSlots(t *MetaItem) error {
 }
 
 
-func (h *handler) findSlots(slotCap, cnt int, t *MetaItem) error {
+func (h *handler) findSlots(slotCap uint64, cnt int, t *MetaItem) error {
 	dtrace.Logf("Finding %d slots for key[%s] with cap[%d]", cnt, t.key, slotCap)
 	group := h.groups[slotCap]
-	if slots, e := group.FindAvailableSlots(t.key, cnt, h.cfg.totalCapacity); e == nil {
+	if slots, extraCap, e := group.FindAvailableSlots( t.key, cnt, h.cfg.TotalCapacity() ); e == nil {
 		if Dev {
 			arr := make([]string, 0, len(slots))
 			for _, s := range slots {
@@ -631,6 +648,10 @@ func (h *handler) findSlots(slotCap, cnt int, t *MetaItem) error {
 				arr = append(arr, p)
 			}
 			dtrace.Logf(" - Got slots for key[%s] with cap[%d]: %v", t.key, slotCap, arr)
+		}
+
+		if extraCap > 0 {
+			h.cfg.AddCapToTotal(extraCap)
 		}
 
 		if len(t.slots) > 0 {
@@ -701,7 +722,7 @@ func (h *handler) handleRetrieval(msgline *MsgLine, rw *bufio.ReadWriter, entry 
 	return nil
 }
 
-func (h *handler) writeRespFirstLine(item *MetaItem, rw *bufio.ReadWriter, byteLen int) error {
+func (h *handler) writeRespFirstLine(item *MetaItem, rw *bufio.ReadWriter, byteLen uint64) error {
 	line := fmt.Sprintf("VALUE %s %d %d\r\n", item.key, item.flags, byteLen)
 	if _, err := rw.Write([]byte(line)); err != nil {
 		return err

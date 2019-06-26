@@ -56,7 +56,7 @@ type MsgLine struct {
 	// Zero means the MsgLine has no expiration time.
 	Expiration int64//time.Duration
 
-	ValueLen int
+	ValueLen uint64
 
 	// Compare and swap ID.
 	CasId uint64
@@ -122,8 +122,8 @@ func (ml *MsgLine) handleStoreCmdParts(parts []string) ([]string, error) {
 	}
 	i++
 
-	if d, e := strconv.ParseInt(parts[i], 10, 64); e == nil && d >= 0 {
-		ml.ValueLen = int(d)
+	if d, e := strconv.ParseUint(parts[i], 10, 64); e == nil && d >= 0 {
+		ml.ValueLen = d
 	} else if e != nil {
 		return nil, e
 	} else {

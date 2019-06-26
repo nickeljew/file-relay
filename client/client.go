@@ -167,7 +167,7 @@ func trySet(key string, tryIndex int) error {
 	msgline := &filerelay.MsgLine{
 		Cmd: "set",
 		Key: key,
-		ValueLen: len(reqValue),
+		ValueLen: uint64( len(reqValue) ),
 		Flags: 1,
 		Expiration: 120,
 	}
