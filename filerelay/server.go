@@ -479,13 +479,15 @@ func (h *handler) process(sc *ServConn, entry *ItemsEntry) error {
 
 	h.state = HdrRunning
 
-	//done and notif
-	fulfill := func() {
+	defer func() {
+		if err := recover(); err != nil {
+			logger.Errorf("handler-process failed: %v", err)
+		}
+
 		h.state = HdrIdle
 		dtrace.Log("handler process completed at index: ", h.index)
 		h.notif <- h
-	}
-	defer fulfill()
+	}()
 
 	line, e := sc.rw.ReadSlice('\n')
 	if e != nil {

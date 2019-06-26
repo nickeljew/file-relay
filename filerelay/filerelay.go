@@ -78,7 +78,7 @@ func Start(rawCfg string) int {
 
 	server := NewServer(cfg)
 	
-	go server.Start()
+	server.Start()
 	defer server.Stop()
 
 	var cIndex uint64 = 0
