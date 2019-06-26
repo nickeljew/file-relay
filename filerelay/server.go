@@ -94,8 +94,8 @@ func NewMemConfig() *MemConfig {
 		SlotCapMin: ValFrom(sz16B, sz64B).(int),
 		SlotCapMax: ValFrom(szKB, sz4KB).(int),
 	
-		SlotsInSlab: ValFrom(20, 1000).(int),
-		SlabsInGroup: ValFrom(20, 1000).(int),
+		SlotsInSlab: ValFrom(20, 100).(int),
+		SlabsInGroup: ValFrom(20, 100).(int),
 
 		MaxStorage: "200MB",
 	}
@@ -683,7 +683,7 @@ func (h *handler) handleRetrieval(msgline *MsgLine, rw *bufio.ReadWriter, entry 
 
 	if byteLen > 0 {
 		for _, s := range item.slots {
-			bytes := s.data[:s.used]
+			bytes := s.Data()
 			if _, e := rw.Write(bytes); e != nil {
 				endResp(e)
 				return e
