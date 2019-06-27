@@ -639,8 +639,13 @@ func (h *handler) allocSlots(t *MetaItem) error {
 
 func (h *handler) findSlots(slotCap uint64, cnt int, t *MetaItem) error {
 	dtrace.Logf("Finding %d slots for key[%s] with cap[%d]", cnt, t.key, slotCap)
+
+	getTotalCap := func() uint64 {
+		return h.cfg.TotalCapacity()
+	}
+
 	group := h.groups[slotCap]
-	if slots, extraCap, e := group.FindAvailableSlots( t.key, cnt, h.cfg.TotalCapacity() ); e == nil {
+	if slots, extraCap, e := group.FindAvailableSlots(t.key, cnt, getTotalCap); e == nil {
 		if Dev {
 			arr := make([]string, 0, len(slots))
 			for _, s := range slots {

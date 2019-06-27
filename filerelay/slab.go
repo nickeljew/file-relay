@@ -153,7 +153,7 @@ func (g *SlabGroup) slabCheckConcurrency(slabCount int) int {
 	return int( math.Round(float64(slabCount) / 10 + 0.5) )
 }
 
-func (g *SlabGroup) FindAvailableSlots(key string, need int, currentTotalCap uint64) ([]*Slot, uint64, error) {
+func (g *SlabGroup) FindAvailableSlots(key string, need int, getTotalCap func() uint64) ([]*Slot, uint64, error) {
 	if need > g.SlotSum() {
 		return nil, 0, errors.New("too many slots to request")
 	}
@@ -223,9 +223,9 @@ func (g *SlabGroup) FindAvailableSlots(key string, need int, currentTotalCap uin
 
 	var cap uint64
 	if cnt > 0 {
-		if currentTotalCap < g.maxStorageSize {
-			g.Lock()
-
+		g.Lock() //lock to keep value of realtime total capacity during group capacity extension
+		totalCap := getTotalCap()
+		if totalCap < g.maxStorageSize {
 			ext := int( math.Round(float64(g.initSlabCount) / 2) )
 			if ext < cnt {
 				ext = cnt
@@ -233,21 +233,22 @@ func (g *SlabGroup) FindAvailableSlots(key string, need int, currentTotalCap uin
 			var extSz uint64
 			for ; ext > 0; ext-- {
 				extSz = uint64(ext) * uint64(g.slotNumInSlab) * g.slotCap
-				if sumCap := currentTotalCap + extSz; sumCap < g.maxStorageSize {
+				if sumCap := totalCap + extSz; sumCap < g.maxStorageSize {
 					break
 				}
 			}
 			memTrace.Logf("mark memory[%d] - total: %d, need: %d; max-limit: %d",
-				g.slotCap, currentTotalCap, extSz, g.maxStorageSize)
+				g.slotCap, totalCap, extSz, g.maxStorageSize)
 			cap = g.AddSlabs(ext)
 
-			g.Unlock()
+			g.Unlock() //group capacity extension completes
 
 			startCheck()
 			if len(slots) < need {
 				return nil, 0, errors.New("no enough slots")
 			}
 		} else {
+			g.Unlock()
 			return nil, 0, errors.New("storage full")
 		}
 
