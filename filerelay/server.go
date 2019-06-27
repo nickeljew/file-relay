@@ -47,7 +47,8 @@ const (
 )
 
 const (
-	SlotMinExpriration = 60
+	CacheMinExpiration = 60
+	CacheMaxEXpiration = 60 * 10
 	SlabCheckInterval = 10
 )
 
@@ -88,7 +89,7 @@ func NewMemConfig() *MemConfig {
 		SkipListCheckStep: 20,
 		//SkipListCheckIntv: 60,
 
-		MinExpiration: SlotMinExpriration,
+		MinExpiration: CacheMinExpiration,
 		SlabCheckIntv: SlabCheckInterval,
 	
 		SlotCapMin: ValFrom(sz16B, sz64B).(uint64),
@@ -543,6 +544,8 @@ func (h *handler) handleStorage(msgline *MsgLine, rw *bufio.ReadWriter, entry *I
 	exp := msgline.Expiration
 	if exp < h.cfg.MinExpiration {
 		exp = h.cfg.MinExpiration
+	} else if exp > CacheMaxEXpiration {
+		exp = CacheMaxEXpiration
 	}
 
 	makeResp := func(cmd []byte) {
