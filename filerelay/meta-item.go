@@ -184,7 +184,7 @@ type ItemsEntry struct {
 	checkpoint *skiplist.Element
 	checkAt time.Time
 	checkSteps int
-	quit chan byte
+	quit chan bool
 	sync.Mutex
 }
 
@@ -192,7 +192,7 @@ func NewItemsEntry(lruSize, checkSteps int) *ItemsEntry {
 	return &ItemsEntry{
 		lru: NewLRU(lruSize),
 		checkSteps: checkSteps,
-		quit: make(chan byte),
+		quit: make(chan bool, 1),
 	}
 }
 
@@ -214,7 +214,7 @@ func (e *ItemsEntry) StartCheck() {
 }
 
 func (e *ItemsEntry) StopCheck() {
-	e.quit <- 0
+	e.quit <- true
 }
 
 func (e *ItemsEntry) ScheduledCheck() {

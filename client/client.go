@@ -57,7 +57,7 @@ var trialKeyMap = TrialKeyMap{
 func main() {
 	fmt.Println("File-Relay client *", time.Now())
 
-	doConcurrentSet(51)
+	doConcurrentSet(101)
 
 	//doConcurrentSet(6)
 	//doSetNGet("test-abc-set-and-get", false)

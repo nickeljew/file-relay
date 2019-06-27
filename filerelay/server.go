@@ -313,8 +313,8 @@ func NewServer(c *MemConfig) *Server {
 		handlers: make([]*handler, 0, c.MaxRoutines),
 		readyHdrs: NewReadyHandlers(),
 		waitQueue: NewWaitQueue(c.MaxRoutines * 10),
-		hdrNotif: make(chan interface{}),
-		quit: make(chan bool),
+		hdrNotif: make(chan interface{}, c.MaxRoutines),
+		quit: make(chan bool, 1),
 
 		memCfg: *c,
 		entry: NewItemsEntry(c.LRUSize, c.SkipListCheckStep),
