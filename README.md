@@ -14,9 +14,9 @@ It works like memcached for sharing data to multiple services.
 ## Code Files Structure
 ```
 ---- main.go : main entry of file-relay server
- |-- filerelay/* : codes of ille-relay server
- |-- debug/* : simple debugging log library
- |-- client/* : test client for debugging
+ |-- filerelay/*.go : codes of file-relay server
+ |-- debug/*.go : simple debugging log library
+ |-- client/*.go : test client for debugging
 ```
 
 ## TODO
