@@ -42,6 +42,10 @@ var (
 	ErrMalformedKey = errors.New("malformed: key is too long or contains invalid characters")
 )
 
+const (
+	MaxFileSize = 1024 * 1024 * 10 //10MB
+)
+
 
 
 type TrialKeyMap struct {
@@ -57,7 +61,8 @@ var trialKeyMap = TrialKeyMap{
 func main() {
 	fmt.Println("File-Relay client *", time.Now())
 
-	doConcurrentSet(101)
+	//doConcurrentSet(101, "")
+	doConcurrentSet(101, "./files")
 
 	//doConcurrentSet(6)
 	//doSetNGet("test-abc-set-and-get", false)
@@ -87,19 +92,31 @@ func setupClient() (*Client, error) {
 }
 
 
-func doConcurrentSet(cnt int) {
+func doConcurrentSet(cnt int, dirPath string) {
 	fin := make(chan int)
 
-	for i := 0; i < cnt; i++ {
-		go doSetInIndex(i, fin)
+	count := 0
+	if dirPath == "" {
+		for i := 0; i < cnt; i++ {
+			count++
+			go doSetInIndex(i, fin, "", "")
+		}
+	} else {
+		handleFile := func(i int, filepath string) bool {
+			fmt.Println("--> File path: ", filepath)
+			count++
+			go doSetInIndex(i, fin, filepath, filepath)
+			return true
+		}
+		readFilesFromDir(dirPath, cnt, handleFile)
 	}
 	
 	for {
 		select {
 		case <- fin:
-			cnt--
+			count--
 			fmt.Println("- left count: ", cnt)
-			if cnt == 0 {
+			if count == 0 {
 				return
 			}
 		}
@@ -107,9 +124,9 @@ func doConcurrentSet(cnt int) {
 }
 
 
-func doSetInIndex(idx int, fin chan int) {
+func doSetInIndex(idx int, fin chan int, key, filepath string) {
 	fmt.Println("Doing at index: ", idx)
-	if err := trySet("", idx); err != nil {
+	if err := trySet(idx, key, filepath); err != nil {
 		fmt.Printf("Error in %d: %s\n", idx, err.Error())
 	} else {
 		fmt.Printf("Finish %d\n", idx)
@@ -120,7 +137,7 @@ func doSetInIndex(idx int, fin chan int) {
 func doSetNGet(key string, onlyGet bool) {
 	if !onlyGet {
 		fmt.Println("# Doing set with key: ", key)
-		if e := trySet(key, 0); e != nil {
+		if e := trySet(0, key, ""); e != nil {
 			fmt.Printf("Error: %s\n", e.Error())
 		} else {
 			fmt.Println("Finish")
@@ -150,7 +167,7 @@ func createKey() string {
 }
 
 //
-func trySet(key string, tryIndex int) error {
+func trySet(tryIndex int, key, filepath string) error {
 	client, err := setupClient()
 	if err != nil {
 		fmt.Println(err.Error())
@@ -158,7 +175,10 @@ func trySet(key string, tryIndex int) error {
 	}
 	defer client.nc.Close()
 
-	reqValue, err := ioutil.ReadFile("./test.txt")
+	if filepath == "" {
+		filepath = "./test.txt"
+	}
+	reqValue, err := ioutil.ReadFile(filepath)
 	key = strings.Trim(key, " \f\n\r\t\v")
 	if key == "" {
 		key = createKey()
@@ -267,4 +287,26 @@ func tryGet(key string) error {
 	itemValue = itemValue[:ml.ValueLen]
 	fmt.Printf("Value:\n%s\n-- END --\n", string(itemValue))
 	return nil
+}
+
+
+
+func readFilesFromDir(dirPath string, count int, handleFile func(idx int, filepath string) bool) {
+	dir, err := ioutil.ReadDir(dirPath)
+	if err != nil {
+		fmt.Println("Error in reading directory")
+		return
+	}
+
+	sep := string(os.PathSeparator)
+	for i, file := range dir {
+		if count > 0 && i >= count {
+			break
+		}
+		if !file.IsDir() && file.Size() <= MaxFileSize {
+			if !handleFile(i, dirPath + sep + file.Name()) {
+				break
+			}
+		}
+	}
 }
