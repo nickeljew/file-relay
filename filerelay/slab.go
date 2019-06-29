@@ -154,9 +154,9 @@ func (g *SlabGroup) slabCheckConcurrency(slabCount int) int {
 }
 
 func (g *SlabGroup) FindAvailableSlots(key string, need int, getTotalCap func() uint64) ([]*Slot, uint64, error) {
-	if need > g.SlotSum() {
-		return nil, 0, errors.New("too many slots to request")
-	}
+	//if need > g.SlotSum() {
+	//	return nil, 0, errors.New("too many slots to request")
+	//}
 
 	slots := make([]*Slot, 0, need)
 	result := make(SlabCh)
@@ -167,7 +167,7 @@ func (g *SlabGroup) FindAvailableSlots(key string, need int, getTotalCap func() 
 	startCheck := func() {
 		slabSum := g.slabs.Len()
 		conc := g.slabCheckConcurrency(slabSum)
-		slabsLeft, slotsLeft = slabSum, g.slotSum
+		slabsLeft, slotsLeft = slabSum, g.SlotSum()
 		if conc > cnt {
 			conc = cnt
 		}
@@ -254,7 +254,7 @@ func (g *SlabGroup) FindAvailableSlots(key string, need int, getTotalCap func() 
 
 	}
 
-	memTrace.Logf(" - finished for Cap: %d - got: %d, Slots-left: %d (%d)", g.slotCap, len(slots), slotsLeft, g.slotSum)
+	memTrace.Logf(" - finished for Cap: %d - got: %d, Slots-left: %d (%d)", g.slotCap, len(slots), slotsLeft, g.SlotSum())
 	return slots, cap, nil
 }
 

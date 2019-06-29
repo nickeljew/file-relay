@@ -61,10 +61,9 @@ var trialKeyMap = TrialKeyMap{
 func main() {
 	fmt.Println("File-Relay client *", time.Now())
 
-	//doConcurrentSet(101, "")
-	doConcurrentSet(101, "./files")
+	//doConcurrentSet(101, "set", "")
+	doConcurrentSet(101, "add", "./files")
 
-	//doConcurrentSet(6)
 	//doSetNGet("test-abc-set-and-get", false)
 	
 	os.Exit(0)
@@ -92,23 +91,32 @@ func setupClient() (*Client, error) {
 }
 
 
-func doConcurrentSet(cnt int, dirPath string) {
+func doConcurrentSet(cnt int, cmd, dirPath string) {
 	fin := make(chan int)
 
 	count := 0
 	if dirPath == "" {
 		for i := 0; i < cnt; i++ {
 			count++
-			go doSetInIndex(i, fin, "", "")
+			go doStorageInIndex(i, fin, cmd, "", "")
 		}
 	} else {
 		handleFile := func(i int, filepath string) bool {
 			fmt.Println("--> File path: ", filepath)
 			count++
-			go doSetInIndex(i, fin, filepath, filepath)
+			go doStorageInIndex(i, fin, cmd, filepath, filepath)
 			return true
 		}
 		readFilesFromDir(dirPath, cnt, handleFile)
+
+		//filepaths := []string{
+		//	dirPath + "/m_1390221131355.jpg",
+		//	dirPath + "/m_1390221125417.jpg",
+		//}
+		//for i := 0; i < len(filepaths); i++ {
+		//	count++
+		//	go doStorageInIndex(i, fin, cmd, filepaths[i], filepaths[i])
+		//}
 	}
 	
 	for {
@@ -124,9 +132,9 @@ func doConcurrentSet(cnt int, dirPath string) {
 }
 
 
-func doSetInIndex(idx int, fin chan int, key, filepath string) {
+func doStorageInIndex(idx int, fin chan int, cmd, key, filepath string) {
 	fmt.Println("Doing at index: ", idx)
-	if err := trySet(idx, key, filepath); err != nil {
+	if err := tryStorage(idx, cmd, key, filepath); err != nil {
 		fmt.Printf("Error in %d: %s\n", idx, err.Error())
 	} else {
 		fmt.Printf("Finish %d\n", idx)
@@ -137,7 +145,7 @@ func doSetInIndex(idx int, fin chan int, key, filepath string) {
 func doSetNGet(key string, onlyGet bool) {
 	if !onlyGet {
 		fmt.Println("# Doing set with key: ", key)
-		if e := trySet(0, key, ""); e != nil {
+		if e := tryStorage(0, "set", key, ""); e != nil {
 			fmt.Printf("Error: %s\n", e.Error())
 		} else {
 			fmt.Println("Finish")
@@ -167,7 +175,7 @@ func createKey() string {
 }
 
 //
-func trySet(tryIndex int, key, filepath string) error {
+func tryStorage(tryIndex int, cmd, key, filepath string) error {
 	client, err := setupClient()
 	if err != nil {
 		fmt.Println(err.Error())
@@ -185,7 +193,7 @@ func trySet(tryIndex int, key, filepath string) error {
 	}
 
 	msgline := &filerelay.MsgLine{
-		Cmd: "set",
+		Cmd: cmd,
 		Key: key,
 		ValueLen: uint64( len(reqValue) ),
 		Flags: 1,
