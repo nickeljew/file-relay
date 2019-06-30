@@ -108,15 +108,6 @@ func doConcurrentSet(cnt int, cmd, dirPath string) {
 			return true
 		}
 		readFilesFromDir(dirPath, cnt, handleFile)
-
-		//filepaths := []string{
-		//	dirPath + "/m_1390221131355.jpg",
-		//	dirPath + "/m_1390221125417.jpg",
-		//}
-		//for i := 0; i < len(filepaths); i++ {
-		//	count++
-		//	go doStorageInIndex(i, fin, cmd, filepaths[i], filepaths[i])
-		//}
 	}
 	
 	for {
@@ -178,7 +169,7 @@ func createKey() string {
 func tryStorage(tryIndex int, cmd, key, filepath string) error {
 	client, err := setupClient()
 	if err != nil {
-		fmt.Println(err.Error())
+		fmt.Printf("Error in setup client for key[%s]: %v", key, err.Error())
 		return nil
 	}
 	defer client.nc.Close()
@@ -207,21 +198,26 @@ func tryStorage(tryIndex int, cmd, key, filepath string) error {
 	//	return err
 	//}
 	if _, err := client.rw.Write([]byte(toSend)); err != nil {
+		fmt.Printf("Error in writing storage cmd-line for key[%s]: %v\n", msgline.Key, err)
 		return err
 	}
 
 	if _, err := client.rw.Write(reqValue); err != nil {
+		fmt.Printf("Error in writing value for key[%s]: %v\n", msgline.Key, err)
 		return err
 	}
 	if _, err := client.rw.Write(filerelay.Crlf); err != nil {
+		fmt.Printf("Error in writing END for key[%s]: %v\n", msgline.Key, err)
 		return err
 	}
 	if err := client.rw.Flush(); err != nil {
+		fmt.Printf("Error in flushing for key[%s]: %v\n", msgline.Key, err)
 		return err
 	}
 
 	line, err := client.rw.ReadSlice('\n')
 	if err != nil {
+		fmt.Printf("Error in read for server for key[%s]: %v\n", msgline.Key, err)
 		return err
 	}
 	fmt.Printf("Response from server[%d] for key[%s]: %s\n", tryIndex, key, strings.Trim(string(line)," \r\n"))
@@ -255,9 +251,11 @@ func tryGet(key string) error {
 	toSend := fmt.Sprintf("get %s\r\n", key)
 	fmt.Printf("Sending:\n>%s", toSend)
 	if _, err := client.rw.Write([]byte(toSend)); err != nil {
+		fmt.Printf("Error in writing retrieval cmd-line for key[%s]: %v\n", key, err)
 		return err
 	}
 	if err := client.rw.Flush(); err != nil {
+		fmt.Printf("Error in flushing for key[%s]: %v\n", key, err)
 		return err
 	}
 

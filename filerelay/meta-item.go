@@ -108,11 +108,10 @@ func (c *LRU) Len() int {
 func (c *LRU) Add(t *MetaItem, noReplace bool) (elem *linkedlist.Element, exceed bool, err error) {
 	// Check for existing item
 	//metaTrace.Logf("*** -==- **** Going check key for adding into LRU: %s, noReplace: %v", t.key, noReplace)
-
 	if el := c.lookup.Get(t.key); el != nil {
 		metaTrace.Logf(" *** Found key %s, noReplace: %v", t.key, noReplace)
 		if noReplace {
-			err = errors.New("key already exists")
+			err = errors.New("key already exists: " + t.key)
 			return
 		}
 		elem = el.Value.(*linkedlist.Element)
