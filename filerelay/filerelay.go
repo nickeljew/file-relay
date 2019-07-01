@@ -96,7 +96,7 @@ func Start(rawCfg string) int {
         cIndex++
 		// Handle connections in a new goroutine.
 		logger.Infof("# New incoming connection [%d]", cIndex)
-        go server.Handle( MakeServConn(conn, cIndex) )
+        server.Handle( MakeServConn(conn, cIndex) )
     }
 
 	//return 0
