@@ -62,7 +62,9 @@ func main() {
 	fmt.Println("File-Relay client *", time.Now())
 
 	//doConcurrentSet(101, "set", "")
-	doConcurrentSet(101, "add", "./files")
+	//doConcurrentSet(101, "add", "./files")
+
+	doAddAndReplace()
 
 	//doSetNGet("test-abc-set-and-get", false)
 	
@@ -114,7 +116,7 @@ func doConcurrentSet(cnt int, cmd, dirPath string) {
 		select {
 		case <- fin:
 			count--
-			fmt.Println("- left count: ", cnt)
+			fmt.Println("- left count: ", count)
 			if count == 0 {
 				return
 			}
@@ -132,6 +134,39 @@ func doStorageInIndex(idx int, fin chan int, cmd, key, filepath string) {
 	}
 	fin <- idx
 }
+
+
+
+
+func doAddAndReplace() {
+	key := "add-replace-key"
+	filepath1 := "./files/m_1390221121382.jpg"
+	filepath2 := "./files/m_1390221149351.jpg"
+
+	if err := tryStorage(0, "add", key, filepath1); err != nil {
+		fmt.Printf("Error in adding: %s\n", err.Error())
+	} else {
+		fmt.Println("Finish adding")
+	}
+
+	if e := tryGet(key); e != nil {
+		fmt.Printf("Error: %s\n", e.Error())
+	}
+
+	if err := tryStorage(0, "replace", key, filepath2); err != nil {
+		fmt.Printf("Error in adding: %s\n", err.Error())
+	} else {
+		fmt.Println("Finish adding")
+	}
+
+	if e := tryGet(key); e != nil {
+		fmt.Printf("Error: %s\n", e.Error())
+	}
+}
+
+
+
+
 
 func doSetNGet(key string, onlyGet bool) {
 	if !onlyGet {
@@ -291,7 +326,7 @@ func tryGet(key string) error {
 		return fmt.Errorf("corrupt get result read")
 	}
 	itemValue = itemValue[:ml.ValueLen]
-	fmt.Printf("Value:\n%s\n-- END --\n", string(itemValue))
+	fmt.Printf("Value:\n%d\n-- END --\n", len(itemValue))
 	return nil
 }
 

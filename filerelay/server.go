@@ -367,7 +367,7 @@ func (s *Server) Start() {
 				if checks > 100 {
 					to *= 10
 				}
-				time.Sleep(timeout)
+				time.Sleep(to)
 			}
 		}//for
 	}()
@@ -707,7 +707,7 @@ func (h *handler) handleRetrieval(msgline *MsgLine, rw *bufio.ReadWriter, entry 
 
 	item := entry.Get(msgline.Key)
 	if item == nil {
-		item = NewMetaItem(msgline.Key, 0, 0, 0)
+		item = voidMetaItem(msgline.Key)
 	}
 
 	// Write value block and end with \r\n
@@ -743,7 +743,12 @@ func (h *handler) handleRetrieval(msgline *MsgLine, rw *bufio.ReadWriter, entry 
 }
 
 func (h *handler) writeRespFirstLine(item *MetaItem, rw *bufio.ReadWriter, byteLen uint64) error {
-	line := fmt.Sprintf("VALUE %s %d %d\r\n", item.key, item.flags, byteLen)
+	var line string
+	if item.casId > 0 {
+		line = fmt.Sprintf("VALUE %s %d %d %d\r\n", item.key, item.flags, byteLen, item.casId)
+	} else {
+		line = fmt.Sprintf("VALUE %s %d %d\r\n", item.key, item.flags, byteLen)
+	}
 	if _, err := rw.Write([]byte(line)); err != nil {
 		return err
 	}

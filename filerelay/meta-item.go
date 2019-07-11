@@ -4,6 +4,7 @@ import (
 	linkedlist "container/list"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -12,10 +13,25 @@ import (
 )
 
 
+var (
+	_GlobalCASUnique uint64
+)
+
+
+func incCASUnique() uint64 {
+	if _GlobalCASUnique == math.MaxUint64 {
+		_GlobalCASUnique = 0
+	}
+	_GlobalCASUnique++
+	return _GlobalCASUnique
+}
+
+
 //
 type MetaItem struct {
 	key string
 	flags uint32
+	casId uint64
 	setAt time.Time
 	duration time.Duration
 	byteLen uint64
@@ -33,6 +49,13 @@ func NewMetaItem(key string, flags uint32, expiration int64, byteLen uint64) (t 
 	secs := fmt.Sprintf("%ds", expiration)
 	t.duration, _ = time.ParseDuration(secs)
 	return
+}
+
+func voidMetaItem(key string) *MetaItem {
+	return &MetaItem{
+		key: key,
+		setAt: time.Now(),
+	}
 }
 
 func (t *MetaItem) ClearSlots() {
@@ -116,10 +139,12 @@ func (c *LRU) Add(t *MetaItem, noReplace bool) (elem *linkedlist.Element, exceed
 		}
 		elem = el.Value.(*linkedlist.Element)
 		c.queue.MoveToFront(elem)
+		t.casId = incCASUnique()
 		elem.Value = t
 		return
 	}
 
+	t.casId = incCASUnique()
 	elem = c.queue.PushFront(t)
 	if el := c.lookup.Set(t.key, elem); el == nil {
 		err = errors.New("failed to add item into skip-list")
@@ -139,6 +164,7 @@ func (c *LRU) Replace(t *MetaItem) *linkedlist.Element {
 	if el := c.lookup.Get(t.key); el != nil {
 		elem := el.Value.(*linkedlist.Element)
 		c.queue.MoveToFront(elem)
+		t.casId = incCASUnique()
 		elem.Value = t
 		return elem
 	}
