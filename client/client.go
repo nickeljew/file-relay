@@ -13,6 +13,9 @@ import (
 	"sync"
 	"time"
 
+	"crypto/md5"
+	"hash/fnv"
+
 	"github.com/nickeljew/file-relay/filerelay"
 )
 
@@ -64,9 +67,24 @@ func main() {
 	//doConcurrentSet(101, "set", "")
 	//doConcurrentSet(101, "add", "./files")
 
-	doAddAndReplace()
+	//doAddAndReplace()
 
 	//doSetNGet("test-abc-set-and-get", false)
+
+	data := []byte("These pretzels are making me thirsty.")
+	hash := md5.Sum(data)
+	fmt.Printf("Hash %T:\n%x\n%v\n\n", hash, hash, hash)
+
+	var hSum uint64
+	for _, h := range hash {
+		m := hSum << 2
+		hSum = m + uint64(h)
+		fmt.Printf("----\nSum: %v %v - mod 1024: %v\n", m, hSum, hSum % 1024)
+	}
+
+	hashing2 := fnv.New32a()
+	hash2 := hashing2.Sum(data)
+	fmt.Printf("Hash2 %T:\n%x\n%v\n\n", hash2, hash2, hash2)
 	
 	os.Exit(0)
 }
